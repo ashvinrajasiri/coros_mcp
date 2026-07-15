@@ -6,6 +6,8 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+*.token.json
+.coros_token.json
 
 # Editors
 .idea/
