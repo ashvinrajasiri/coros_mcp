@@ -43,10 +43,16 @@ class AuthSession:
         self._load_token_cache()
 
     def headers(self) -> dict[str, str]:
-        headers = {"content-type": "application/json"}
-        if self._access_token:
-            headers["accesstoken"] = self._access_token
-        return headers
+        if not self._access_token:
+            raise ToolError(
+                "COROS access token is missing",
+                code="UNAUTHORIZED",
+                hint="Call login() before making authenticated requests.",
+            )
+        return {
+            "accesstoken": self._access_token,
+            "content-type": "application/json",
+        }
 
     def login(self, client: httpx.Client) -> None:
         try:
@@ -106,12 +112,17 @@ class AuthSession:
 
         if not isinstance(payload, dict):
             return
-        access_token = payload.get("accessToken")
+
+        access_token = payload.get("access_token") or payload.get("accessToken")
         if not isinstance(access_token, str) or not access_token:
             return
 
+        cached_region = payload.get("region")
+        if not isinstance(cached_region, str) or cached_region.strip().lower() != self._config.region:
+            return
+
         self._access_token = access_token
-        user_id = payload.get("userId")
+        user_id = payload.get("user_id") or payload.get("userId")
         self.user_id = str(user_id) if user_id is not None else None
 
     def _save_token_cache(self) -> None:
@@ -119,8 +130,11 @@ class AuthSession:
         if cache_path is None or self._access_token is None:
             return
 
-        payload: dict[str, str] = {"accessToken": self._access_token}
+        payload: dict[str, str] = {
+            "access_token": self._access_token,
+            "region": self._config.region,
+        }
         if self.user_id is not None:
-            payload["userId"] = self.user_id
+            payload["user_id"] = self.user_id
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         cache_path.write_text(json.dumps(payload))

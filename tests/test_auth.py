@@ -27,6 +27,15 @@ def test_base_url_invalid_region_raises_validation_error():
     assert error.value.code == "VALIDATION_ERROR"
 
 
+def test_headers_raises_unauthorized_without_token():
+    session = AuthSession(Config(email="athlete@example.com", password="password"))
+
+    with pytest.raises(ToolError) as error:
+        session.headers()
+
+    assert error.value.code == "UNAUTHORIZED"
+
+
 def test_login_saves_token_cache_and_uses_hashed_password(tmp_path):
     cache_path = tmp_path / "token.json"
     config = Config(
@@ -65,19 +74,79 @@ def test_login_saves_token_cache_and_uses_hashed_password(tmp_path):
         "content-type": "application/json",
     }
     assert json.loads(cache_path.read_text()) == {
-        "accessToken": "cached-token",
-        "userId": "user-123",
+        "access_token": "cached-token",
+        "user_id": "user-123",
+        "region": "us",
     }
 
 
 def test_session_loads_and_clears_valid_token_cache(tmp_path):
     cache_path = tmp_path / "token.json"
-    cache_path.write_text(json.dumps({"accessToken": "from-cache", "userId": "user-123"}))
+    cache_path.write_text(
+        json.dumps({"access_token": "from-cache", "user_id": "user-123", "region": "us"})
+    )
     session = AuthSession(
         Config(email="athlete@example.com", password="password", token_cache=str(cache_path))
     )
 
     assert session.headers()["accesstoken"] == "from-cache"
     session.clear()
-    assert session.headers() == {"content-type": "application/json"}
+    with pytest.raises(ToolError) as error:
+        session.headers()
+    assert error.value.code == "UNAUTHORIZED"
     assert not cache_path.exists()
+
+
+def test_session_loads_camel_case_cache_for_compatibility(tmp_path):
+    cache_path = tmp_path / "token.json"
+    cache_path.write_text(
+        json.dumps({"accessToken": "legacy-token", "userId": "user-456", "region": "us"})
+    )
+    session = AuthSession(
+        Config(email="athlete@example.com", password="password", token_cache=str(cache_path))
+    )
+
+    assert session.headers()["accesstoken"] == "legacy-token"
+    assert session.user_id == "user-456"
+
+
+def test_session_ignores_cache_when_region_mismatch(tmp_path):
+    cache_path = tmp_path / "token.json"
+    cache_path.write_text(
+        json.dumps({"access_token": "eu-token", "user_id": "user-123", "region": "eu"})
+    )
+    session = AuthSession(
+        Config(
+            email="athlete@example.com",
+            password="password",
+            region="us",
+            token_cache=str(cache_path),
+        )
+    )
+
+    with pytest.raises(ToolError) as error:
+        session.headers()
+    assert error.value.code == "UNAUTHORIZED"
+
+
+@pytest.mark.parametrize(
+    ("response", "status_code"),
+    [
+        ({"result": "1001", "data": {}}, 200),
+        (None, 500),
+    ],
+)
+def test_login_failure_raises_auth_failed(response, status_code):
+    config = Config(email="athlete@example.com", password="password")
+
+    def login_handler(_request: httpx.Request) -> httpx.Response:
+        if response is None:
+            return httpx.Response(status_code)
+        return httpx.Response(status_code, json=response)
+
+    session = AuthSession(config)
+    with httpx.Client(transport=httpx.MockTransport(login_handler)) as client:
+        with pytest.raises(ToolError) as error:
+            session.login(client)
+
+    assert error.value.code == "AUTH_FAILED"
