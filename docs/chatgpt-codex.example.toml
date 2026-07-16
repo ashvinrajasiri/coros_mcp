@@ -1,0 +1,12 @@
+# Add to ~/.codex/config.toml (used by ChatGPT desktop + Codex).
+# Replace /path/to/coros_mcp with your clone path.
+
+[mcp_servers.coros]
+command = "/path/to/coros_mcp/.venv/bin/coros-mcp"
+args = []
+
+[mcp_servers.coros.env]
+COROS_EMAIL = "you@example.com"
+COROS_PASSWORD = "your-password"
+COROS_REGION = "us"
+COROS_TOKEN_CACHE = "/path/to/coros_mcp/.coros_token.json"

@@ -48,16 +48,73 @@ pip install -e .
 
 Copy `.env.example` → `.env` for local scripts. **MCP hosts do not load project `.env`** — put credentials in the host config `env` block (below).
 
-## Hermes setup
+## Add to Claude, ChatGPT, or Hermes
 
-On the machine where Hermes runs (e.g. Mac mini), install the package (see above), then add a server entry. Examples:
+Install the package on the **same computer** as the app (see [Install](#install)). Every host needs the absolute path to `.venv/bin/coros-mcp` plus your COROS credentials in `env`.
+
+Replace `/path/to/coros_mcp` below with your clone path.
+
+### Claude Desktop
+
+1. Install coros-mcp (above).
+2. Open **Claude Desktop → Settings → Developer → Edit Config** (or edit the file directly):
+   - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+   - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+3. Merge this into the file (keep any other servers you already have):
+
+```json
+{
+  "mcpServers": {
+    "coros": {
+      "command": "/path/to/coros_mcp/.venv/bin/coros-mcp",
+      "args": [],
+      "env": {
+        "COROS_EMAIL": "you@example.com",
+        "COROS_PASSWORD": "your-password",
+        "COROS_REGION": "us",
+        "COROS_TOKEN_CACHE": "/path/to/coros_mcp/.coros_token.json"
+      }
+    }
+  }
+}
+```
+
+4. Fully quit and reopen Claude Desktop.
+5. Start a chat and ask something like “list my COROS workouts” — you should see `coros` tools available.
+
+Same JSON shape: [`docs/hermes-mcp.example.json`](docs/hermes-mcp.example.json).
+
+### ChatGPT desktop app
+
+ChatGPT desktop (and Codex) support **local STDIO** MCP servers.
+
+**UI (easiest):**
+
+1. Install coros-mcp (above).
+2. Open **Settings → MCP servers → Add server**.
+3. Choose **STDIO**, name it `coros`.
+4. Command: `/path/to/coros_mcp/.venv/bin/coros-mcp`
+5. Add env vars: `COROS_EMAIL`, `COROS_PASSWORD`, `COROS_REGION` (and optional `COROS_TOKEN_CACHE`).
+6. Save, then **Restart**.
+7. In chat, type `/mcp` to confirm `coros` is connected.
+
+**Or edit `~/.codex/config.toml`** (shared by ChatGPT desktop / Codex). Example: [`docs/chatgpt-codex.example.toml`](docs/chatgpt-codex.example.toml).
+
+Notes:
+
+- You need a ChatGPT plan/app build that exposes MCP servers (desktop; not the plain mobile web chat).
+- This MCP is **local stdio only** — it is not a hosted URL you paste into ChatGPT web connectors/plugins.
+
+### Hermes
+
+On the machine where Hermes runs (e.g. Mac mini), add a server entry:
 
 - YAML: [`docs/hermes-mcp.example.yaml`](docs/hermes-mcp.example.yaml)
 - JSON: [`docs/hermes-mcp.example.json`](docs/hermes-mcp.example.json)
 
-Point `command` at **this clone’s** `.venv/bin/coros-mcp`, and set `COROS_EMAIL` / `COROS_PASSWORD` / `COROS_REGION` in `env`.
+Point `command` at this clone’s `.venv/bin/coros-mcp`, set credentials in `env`, then `/reload-mcp`.
 
-After `git pull`, run `pip install -e .` again if dependencies changed, then `/reload-mcp` in Hermes.
+After any `git pull`, run `pip install -e .` again if needed, then reload MCP in the host.
 
 ## Creating workouts with pace
 
