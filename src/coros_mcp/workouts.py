@@ -27,8 +27,8 @@ def intermediate_to_program_exercises(
 ) -> list[dict[str, Any]]:
     """Convert stable intermediate steps into COROS library-program exercises.
 
-    Pace targets are milliseconds per kilometer in ``intensityValue`` /
-    ``intensityValueExtend`` with ``intensityDisplayUnit=2``.
+    Pace targets are milliseconds in the selected unit:
+    miles → intensityDisplayUnit=1, km → intensityDisplayUnit=2.
     """
     if sport not in {"run", "bike", "strength"}:
         raise ToolError(

@@ -1,9 +1,12 @@
 """Human-friendly pace parsing for COROS run/bike program steps.
 
-COROS stores pace intensity as milliseconds per kilometer in ``intensityValue``
-/ ``intensityValueExtend``, with ``intensityType=3`` (pace) and
-``intensityDisplayUnit=2`` (km). Values are always stored as ms/km even when the
-user specifies miles; COROS converts at display time.
+COROS stores pace as milliseconds **in the selected distance unit**:
+
+- ``intensityDisplayUnit=1`` → miles → ``intensityValue`` is ms per mile
+- ``intensityDisplayUnit=2`` → km → ``intensityValue`` is ms per kilometer
+
+Example: easy 9:30/mi → intensityValue=570000, intensityDisplayUnit=1
+Example: tempo 4:30/km → intensityValue=270000, intensityDisplayUnit=2
 """
 
 from __future__ import annotations
@@ -12,8 +15,6 @@ import re
 from typing import Any
 
 from coros_mcp.errors import ToolError
-
-_METERS_PER_MILE = 1609.344
 
 _PACE_RE = re.compile(
     r"""
@@ -28,7 +29,10 @@ _PACE_RE = re.compile(
 )
 
 _MI_UNITS = {"mi", "mile", "miles", "m", "min_per_mi"}
-_KM_UNITS = {"km", "kilometer", "kilometers", "k", "min_per_km", ""}
+_KM_UNITS = {"km", "kilometer", "kilometers", "k", "min_per_km"}
+
+_DISPLAY_UNIT_MI = 1
+_DISPLAY_UNIT_KM = 2
 
 
 def parse_pace_target(
@@ -45,11 +49,12 @@ def parse_pace_target(
             return _parse_pace_string(text)
 
     if isinstance(low, str) and ":" in str(low):
-        low_ms = _mmss_to_ms_per_km(str(low), unit)
+        display_unit = _display_unit_for(unit)
+        low_ms = _mmss_to_ms(str(low))
         if high is None:
-            return _intensity_fields(low_ms, low_ms)
-        high_ms = _mmss_to_ms_per_km(str(high), unit)
-        return _intensity_fields(*sorted((low_ms, high_ms)))
+            return _intensity_fields(low_ms, low_ms, display_unit)
+        high_ms = _mmss_to_ms(str(high))
+        return _intensity_fields(*sorted((low_ms, high_ms)), display_unit)
 
     if isinstance(low, (int, float)):
         return _parse_numeric_pace(float(low), high, unit=unit)
@@ -78,7 +83,9 @@ def _parse_pace_string(text: str) -> dict[str, Any]:
             code="VALIDATION_ERROR",
             hint="Seconds must be 0-59.",
         )
-    low_ms = _pace_to_ms_per_km(min1, sec1, match["unit"])
+    unit = match["unit"]
+    display_unit = _display_unit_for(unit)
+    low_ms = _pace_parts_to_ms(min1, sec1)
 
     min2_raw = match["min2"]
     sec2_raw = match["sec2"]
@@ -90,36 +97,24 @@ def _parse_pace_string(text: str) -> dict[str, Any]:
                 code="VALIDATION_ERROR",
                 hint="Seconds must be 0-59.",
             )
-        high_ms = _pace_to_ms_per_km(int(min2_raw), sec2, match["unit"])
+        high_ms = _pace_parts_to_ms(int(min2_raw), sec2)
     else:
         high_ms = low_ms
 
-    return _intensity_fields(*sorted((low_ms, high_ms)))
+    return _intensity_fields(*sorted((low_ms, high_ms)), display_unit)
 
 
 def _parse_numeric_pace(
     low: float, high: float | int | None, *, unit: str | None
 ) -> dict[str, Any]:
-    """Interpret numeric pace as total seconds per km or per mi when unit says so."""
-    normalized = (unit or "min_per_km").strip().lower()
-    if normalized in _MI_UNITS:
-        low_ms = _seconds_per_unit_to_ms_per_km(low, per_mile=True)
-        high_ms = (
-            _seconds_per_unit_to_ms_per_km(float(high), per_mile=True)
-            if high is not None
-            else low_ms
-        )
-    else:
-        low_ms = _seconds_per_unit_to_ms_per_km(low, per_mile=False)
-        high_ms = (
-            _seconds_per_unit_to_ms_per_km(float(high), per_mile=False)
-            if high is not None
-            else low_ms
-        )
-    return _intensity_fields(*sorted((low_ms, high_ms)))
+    """Interpret numeric pace as total seconds per the given unit."""
+    display_unit = _display_unit_for(unit)
+    low_ms = _seconds_to_ms(low)
+    high_ms = _seconds_to_ms(float(high)) if high is not None else low_ms
+    return _intensity_fields(*sorted((low_ms, high_ms)), display_unit)
 
 
-def _mmss_to_ms_per_km(value: str, unit: str | None) -> int:
+def _mmss_to_ms(value: str) -> int:
     minutes, separator, seconds = value.strip().partition(":")
     if not separator:
         raise ToolError(
@@ -131,7 +126,7 @@ def _mmss_to_ms_per_km(value: str, unit: str | None) -> int:
         sec = float(seconds)
         if sec < 0 or sec >= 60:
             raise ValueError("seconds out of range")
-        return _pace_to_ms_per_km(int(minutes), sec, unit)
+        return _pace_parts_to_ms(int(minutes), sec)
     except ValueError as error:
         raise ToolError(
             f"Invalid pace: {value!r}",
@@ -140,37 +135,41 @@ def _mmss_to_ms_per_km(value: str, unit: str | None) -> int:
         ) from error
 
 
-def _pace_to_ms_per_km(minutes: int, seconds: float, unit: str | None) -> int:
-    ms_per_unit = int(round((minutes * 60 + seconds) * 1000))
-    unit_raw = (unit or "min_per_km").strip().lower()
-    if unit_raw in _MI_UNITS or unit_raw == "m":
-        return int(round(ms_per_unit * 1000.0 / _METERS_PER_MILE))
-    if unit_raw in _KM_UNITS:
-        return ms_per_unit
-    raise ToolError(
-        f"Unsupported pace unit: {unit!r}",
-        code="UNSUPPORTED_SPORT_STEP",
-        hint="Use min_per_km or min_per_mi.",
-    )
+def _pace_parts_to_ms(minutes: int, seconds: float) -> int:
+    return int(round((minutes * 60 + seconds) * 1000))
 
 
-def _seconds_per_unit_to_ms_per_km(seconds: float, *, per_mile: bool) -> int:
+def _seconds_to_ms(seconds: float) -> int:
     if seconds <= 0:
         raise ToolError(
             "Pace must be positive.",
             code="VALIDATION_ERROR",
             hint="Use a positive pace value.",
         )
-    ms = int(round(seconds * 1000))
-    if per_mile:
-        return int(round(ms * 1000.0 / _METERS_PER_MILE))
-    return ms
+    return int(round(seconds * 1000))
 
 
-def _intensity_fields(fast_ms: int, slow_ms: int) -> dict[str, Any]:
+def _display_unit_for(unit: str | None) -> int:
+    """Return COROS intensityDisplayUnit for a pace unit (1=mi, 2=km)."""
+    # Default to miles — matches US/Canada Training Hub accounts like the author's.
+    if unit is None or str(unit).strip() == "":
+        return _DISPLAY_UNIT_MI
+    unit_raw = str(unit).strip().lower()
+    if unit_raw in _MI_UNITS:
+        return _DISPLAY_UNIT_MI
+    if unit_raw in _KM_UNITS:
+        return _DISPLAY_UNIT_KM
+    raise ToolError(
+        f"Unsupported pace unit: {unit!r}",
+        code="UNSUPPORTED_SPORT_STEP",
+        hint="Use min_per_mi or min_per_km.",
+    )
+
+
+def _intensity_fields(fast_ms: int, slow_ms: int, display_unit: int) -> dict[str, Any]:
     return {
         "kind": "pace",
         "target_low": fast_ms,
         "target_high": slow_ms,
-        "intensity_display_unit": 2,
+        "intensity_display_unit": display_unit,
     }
