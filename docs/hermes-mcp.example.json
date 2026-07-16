@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "coros": {
+      "command": "/Users/ashvinrajasiri/workspace/coros_mcp/.worktrees/coros-mcp-impl/.venv/bin/coros-mcp",
+      "args": [],
+      "env": {
+        "COROS_EMAIL": "you@example.com",
+        "COROS_PASSWORD": "your-password",
+        "COROS_REGION": "us"
+      }
+    }
+  }
+}

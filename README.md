@@ -46,11 +46,14 @@ Pass credentials in the host config, not in the repo.
 
 ### Hermes / Claude Desktop
 
+Use [`docs/hermes-mcp.example.json`](docs/hermes-mcp.example.json) as a starting
+point. It uses this implementation worktree for development:
+
 ```json
 {
   "mcpServers": {
     "coros": {
-      "command": "/path/to/coros_mcp/.venv/bin/coros-mcp",
+      "command": "/Users/ashvinrajasiri/workspace/coros_mcp/.worktrees/coros-mcp-impl/.venv/bin/coros-mcp",
       "args": [],
       "env": {
         "COROS_EMAIL": "you@example.com",
@@ -62,7 +65,22 @@ Pass credentials in the host config, not in the repo.
 }
 ```
 
+After this branch is merged, create the virtual environment and install
+`coros-mcp` from the main repository checkout, then replace the worktree path
+with the corresponding main-repository `.venv/bin/coros-mcp` path.
+
 Adapt the config key names to your host if they differ (e.g. `mcp_servers` vs `mcpServers`).
+
+## End-to-end checklist
+
+Before relying on the server for training plans, validate the full COROS flow:
+
+1. Call `get_daily_metrics` for today.
+2. Call `list_activities` for the last 14 days.
+3. Call `create_workout` with a simple easy run.
+4. Call `schedule_workout` for tomorrow.
+5. Confirm the workout in COROS Training Hub.
+6. Sync the phone app and verify the workout reaches the watch.
 
 ## Design
 
