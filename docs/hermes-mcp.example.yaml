@@ -1,0 +1,20 @@
+# Add under mcp_servers in ~/.hermes/config.yaml on the machine where Hermes runs.
+#
+# Prerequisites on that machine:
+#   cd /path/to/coros_mcp
+#   python3 -m venv .venv && source .venv/bin/activate
+#   pip install -e .
+#
+# Then reload MCP in Hermes with: /reload-mcp
+
+mcp_servers:
+  coros:
+    command: "/Users/ashvinrajasiri/workspace/coros_mcp/.venv/bin/coros-mcp"
+    args: []
+    timeout: 180
+    connect_timeout: 60
+    env:
+      COROS_EMAIL: "you@example.com"
+      COROS_PASSWORD: "your-password"
+      COROS_REGION: "us"
+      COROS_TOKEN_CACHE: "/Users/ashvinrajasiri/workspace/coros_mcp/.coros_token.json"
