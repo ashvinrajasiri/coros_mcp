@@ -21,6 +21,16 @@ def test_check_response_raises_coros_api_error_for_failure_result():
     assert error.value.code == "COROS_API_ERROR"
 
 
+def test_create_program_extracts_id_from_dict_response(monkeypatch):
+    client = CorosClient(Config(email="athlete@example.com", password="password"))
+    monkeypatch.setattr(client, "_request", lambda *args, **kwargs: {"id": 1234})
+
+    try:
+        assert client.create_program({"name": "Easy"}) == "1234"
+    finally:
+        client.close()
+
+
 def test_get_day_detail_converts_dates_and_returns_data():
     requests: list[httpx.Request] = []
 

@@ -89,7 +89,17 @@ class CorosClient:
 
     def create_program(self, payload: dict) -> str:
         data = self._request("POST", "/training/program/add", json=payload)
-        return str(data)
+        if isinstance(data, Mapping):
+            for key in ("id", "programId", "program_id", "labelId"):
+                if data.get(key) is not None:
+                    return str(data[key])
+        if isinstance(data, (str, int)):
+            return str(data)
+        raise ToolError(
+            "COROS API did not return a created program id",
+            code="COROS_API_ERROR",
+            hint="Try creating the workout again.",
+        )
 
     def delete_program(self, program_id: str) -> None:
         self._request(
