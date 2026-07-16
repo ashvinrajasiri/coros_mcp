@@ -132,9 +132,9 @@ def get_workout(workout_id: str) -> dict:
 def create_workout(name: str, sport: str, steps: list[dict]) -> dict:
     """Create a library workout from sport-agnostic steps. Agent owns coaching.
 
-    Pace targets: use MM:SS with unit min_per_mi or min_per_km, e.g.
-    {"kind": "pace", "low": "9:30", "unit": "min_per_mi"} or low="9:30/mi".
-    Sync to watch via COROS app after scheduling.
+    Pace targets: use MM:SS with unit min_per_km or min_per_mi, e.g.
+    {"kind": "pace", "low": "5:45", "unit": "min_per_km"} or low="9:30/mi".
+    Stored unit follows COROS_DISTANCE_UNIT (default km). Sync via COROS app.
     """
     try:
         workout = WorkoutCreate.model_validate(

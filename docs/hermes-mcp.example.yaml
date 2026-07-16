@@ -17,4 +17,5 @@ mcp_servers:
       COROS_EMAIL: "you@example.com"
       COROS_PASSWORD: "your-password"
       COROS_REGION: "us"
+      COROS_DISTANCE_UNIT: "km"
       COROS_TOKEN_CACHE: "/Users/ashvinrajasiri/workspace/coros_mcp/.coros_token.json"

@@ -72,7 +72,8 @@ def test_repeat_nest_preserves_count_and_mapped_child_steps():
     ]
 
 
-def test_pace_target_maps_to_ms_per_unit():
+def test_pace_target_maps_to_ms_per_unit(monkeypatch):
+    monkeypatch.setenv("COROS_DISTANCE_UNIT", "km")
     workout = WorkoutCreate.model_validate(
         {
             "name": "Tempo",
@@ -98,7 +99,8 @@ def test_pace_target_maps_to_ms_per_unit():
     }
 
 
-def test_easy_run_pace_min_per_mi_program_exercise():
+def test_easy_run_pace_min_per_mi_program_exercise(monkeypatch):
+    monkeypatch.setenv("COROS_DISTANCE_UNIT", "km")
     workout = WorkoutCreate.model_validate(
         {
             "name": "Easy",
@@ -117,8 +119,8 @@ def test_easy_run_pace_min_per_mi_program_exercise():
     )
     exercise = exercises[0]
     assert exercise["intensityType"] == 3
-    assert exercise["intensityDisplayUnit"] == 1
-    assert exercise["intensityValue"] == 570_000
+    assert exercise["intensityDisplayUnit"] == 2
+    assert 353_000 <= exercise["intensityValue"] <= 355_000
     assert exercise["intensityValue"] == exercise["intensityValueExtend"]
 
 
