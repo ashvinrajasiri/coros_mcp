@@ -1,12 +1,16 @@
 """Human-friendly pace parsing for COROS run/bike program steps.
 
-COROS stores pace as milliseconds in a distance unit:
+COROS stores absolute pace as **seconds per kilometer** in
+``intensityValue`` / ``intensityValueExtend`` (``intensityType=3``).
 
-- ``intensityDisplayUnit=1`` → miles → ms per mile
-- ``intensityDisplayUnit=2`` → km → ms per kilometer
+``intensityDisplayUnit`` only controls the Training Hub dropdown label
+(from the Hub ``intensityUnitName`` enum):
 
-Input may be mi or km. Values are converted to ``COROS_DISTANCE_UNIT``
-(default ``km``) so the watch matches the athlete's COROS app units.
+- ``1`` → min/km
+- ``2`` → min/mi
+
+Input may be mi or km. Values are converted to seconds/km; the display
+unit follows the athlete preference (account setting / ``COROS_DISTANCE_UNIT``).
 """
 
 from __future__ import annotations
@@ -34,14 +38,15 @@ _PACE_RE = re.compile(
 _MI_UNITS = {"mi", "mile", "miles", "m", "min_per_mi"}
 _KM_UNITS = {"km", "kilometer", "kilometers", "k", "min_per_km"}
 
-_DISPLAY_UNIT_MI = 1
-_DISPLAY_UNIT_KM = 2
+# Training Hub intensityUnitName enum.
+_DISPLAY_UNIT_KM = 1  # min/km
+_DISPLAY_UNIT_MI = 2  # min/mi
 
 DistanceUnit = Literal["km", "mi"]
 
 
 def distance_unit_preference(store_as: DistanceUnit | None = None) -> DistanceUnit:
-    """Return unit for storing paces.
+    """Return preferred *display* unit for paces (dropdown label).
 
     Prefer an explicit ``store_as`` (from the authenticated COROS account).
     ``COROS_DISTANCE_UNIT`` remains an optional override via callers that pass
@@ -65,7 +70,7 @@ def parse_pace_target(
     unit: str | None = None,
     store_as: DistanceUnit | None = None,
 ) -> dict[str, Any]:
-    """Parse friendly pace input into COROS intensity fields."""
+    """Parse friendly pace input into COROS intensity fields (seconds/km)."""
     preferred = store_as or distance_unit_preference()
 
     if isinstance(low, str):
@@ -75,15 +80,15 @@ def parse_pace_target(
 
     if isinstance(low, str) and ":" in str(low):
         input_unit = _normalize_input_unit(unit, preferred=preferred)
-        low_ms = _mmss_to_ms(str(low))
-        high_ms = _mmss_to_ms(str(high)) if high is not None else low_ms
-        return _finalize((low_ms, high_ms, input_unit), preferred)
+        low_s = _mmss_to_seconds(str(low))
+        high_s = _mmss_to_seconds(str(high)) if high is not None else low_s
+        return _finalize((low_s, high_s, input_unit), preferred)
 
     if isinstance(low, (int, float)):
         input_unit = _normalize_input_unit(unit, preferred=preferred)
-        low_ms = _seconds_to_ms(float(low))
-        high_ms = _seconds_to_ms(float(high)) if high is not None else low_ms
-        return _finalize((low_ms, high_ms, input_unit), preferred)
+        low_s = _positive_seconds(float(low))
+        high_s = _positive_seconds(float(high)) if high is not None else low_s
+        return _finalize((low_s, high_s, input_unit), preferred)
 
     raise ToolError(
         f"Invalid pace: {low!r}",
@@ -94,7 +99,7 @@ def parse_pace_target(
 
 def _parse_pace_string_raw(
     text: str, *, preferred: DistanceUnit
-) -> tuple[int, int, DistanceUnit]:
+) -> tuple[float, float, DistanceUnit]:
     match = _PACE_RE.match(text.strip())
     if not match:
         raise ToolError(
@@ -112,7 +117,7 @@ def _parse_pace_string_raw(
             hint="Seconds must be 0-59.",
         )
     input_unit = _normalize_input_unit(match["unit"], preferred=preferred)
-    low_ms = _pace_parts_to_ms(min1, sec1)
+    low_s = _pace_parts_to_seconds(min1, sec1)
 
     min2_raw = match["min2"]
     sec2_raw = match["sec2"]
@@ -124,36 +129,38 @@ def _parse_pace_string_raw(
                 code="VALIDATION_ERROR",
                 hint="Seconds must be 0-59.",
             )
-        high_ms = _pace_parts_to_ms(int(min2_raw), sec2)
+        high_s = _pace_parts_to_seconds(int(min2_raw), sec2)
     else:
-        high_ms = low_ms
+        high_s = low_s
 
-    return low_ms, high_ms, input_unit
+    return low_s, high_s, input_unit
 
 
 def _finalize(
-    parsed: tuple[int, int, DistanceUnit], preferred: DistanceUnit
+    parsed: tuple[float, float, DistanceUnit], preferred: DistanceUnit
 ) -> dict[str, Any]:
-    low_ms, high_ms, input_unit = parsed
-    low_ms = _convert_ms(low_ms, from_unit=input_unit, to_unit=preferred)
-    high_ms = _convert_ms(high_ms, from_unit=input_unit, to_unit=preferred)
+    """Convert input to seconds/km and set display unit for the Hub dropdown."""
+    low_s, high_s, input_unit = parsed
+    low_s = _convert_seconds(low_s, from_unit=input_unit, to_unit="km")
+    high_s = _convert_seconds(high_s, from_unit=input_unit, to_unit="km")
     display_unit = _DISPLAY_UNIT_MI if preferred == "mi" else _DISPLAY_UNIT_KM
-    return _intensity_fields(*sorted((low_ms, high_ms)), display_unit)
+    return _intensity_fields(*sorted((low_s, high_s)), display_unit)
 
 
-def _convert_ms(ms: int, *, from_unit: DistanceUnit, to_unit: DistanceUnit) -> int:
+def _convert_seconds(
+    seconds: float, *, from_unit: DistanceUnit, to_unit: DistanceUnit
+) -> float:
     if from_unit == to_unit:
-        return ms
+        return seconds
     if from_unit == "mi" and to_unit == "km":
-        return int(round(ms * 1000.0 / _METERS_PER_MILE))
-    return int(round(ms * _METERS_PER_MILE / 1000.0))
+        return seconds * 1000.0 / _METERS_PER_MILE
+    return seconds * _METERS_PER_MILE / 1000.0
 
 
 def _normalize_input_unit(
     unit: str | None, *, preferred: DistanceUnit
 ) -> DistanceUnit:
     if unit is None or str(unit).strip() == "":
-        # Bare MM:SS with no unit → interpret using athlete preference.
         return preferred
     unit_raw = str(unit).strip().lower()
     if unit_raw in _MI_UNITS:
@@ -167,7 +174,7 @@ def _normalize_input_unit(
     )
 
 
-def _mmss_to_ms(value: str) -> int:
+def _mmss_to_seconds(value: str) -> float:
     minutes, separator, seconds = value.strip().partition(":")
     if not separator:
         raise ToolError(
@@ -179,7 +186,7 @@ def _mmss_to_ms(value: str) -> int:
         sec = float(seconds)
         if sec < 0 or sec >= 60:
             raise ValueError("seconds out of range")
-        return _pace_parts_to_ms(int(minutes), sec)
+        return _pace_parts_to_seconds(int(minutes), sec)
     except ValueError as error:
         raise ToolError(
             f"Invalid pace: {value!r}",
@@ -188,24 +195,26 @@ def _mmss_to_ms(value: str) -> int:
         ) from error
 
 
-def _pace_parts_to_ms(minutes: int, seconds: float) -> int:
-    return int(round((minutes * 60 + seconds) * 1000))
+def _pace_parts_to_seconds(minutes: int, seconds: float) -> float:
+    return minutes * 60 + seconds
 
 
-def _seconds_to_ms(seconds: float) -> int:
+def _positive_seconds(seconds: float) -> float:
     if seconds <= 0:
         raise ToolError(
             "Pace must be positive.",
             code="VALIDATION_ERROR",
             hint="Use a positive pace value.",
         )
-    return int(round(seconds * 1000))
+    return seconds
 
 
-def _intensity_fields(fast_ms: int, slow_ms: int, display_unit: int) -> dict[str, Any]:
+def _intensity_fields(
+    fast_seconds: float, slow_seconds: float, display_unit: int
+) -> dict[str, Any]:
     return {
         "kind": "pace",
-        "target_low": fast_ms,
-        "target_high": slow_ms,
+        "target_low": int(round(fast_seconds)),
+        "target_high": int(round(slow_seconds)),
         "intensity_display_unit": display_unit,
     }

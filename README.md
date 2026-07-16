@@ -1,22 +1,40 @@
 # coros-mcp
 
-Sport-agnostic [Model Context Protocol](https://modelcontextprotocol.io/) server for the COROS Training Hub. Lets any MCP-capable AI agent (Hermes, Claude Desktop, ChatGPT with local MCP, etc.) read training data, manage workout library entries, and schedule workouts on the COROS calendar.
+Local [MCP](https://modelcontextprotocol.io/) server for the unofficial COROS Training Hub API. Any MCP host (Hermes, Claude Desktop, etc.) can read training data, create library workouts, and schedule them on the COROS calendar.
 
-Coaching logic (goals, periodization, workout selection) lives in the **agent**, not in this server.
+Coaching stays in the agent. This server is thin I/O only.
 
-## Unofficial API warning
+## Unofficial API
 
-COROS does not publish a public developer API. This server uses the same private HTTPS endpoints as [COROS Training Hub](https://t.coros.com). Those endpoints can change or break when COROS updates the web app. Use at your own risk.
+COROS has no public developer API. This talks to the same private HTTPS endpoints as [Training Hub](https://training.coros.com). Endpoints can change without notice.
 
-## Watch sync
-
-Changes flow in one direction:
+## How data reaches the watch
 
 ```text
-MCP → COROS cloud → COROS phone app → watch
+Agent → coros-mcp → COROS cloud → phone app sync → watch
 ```
 
-The MCP writes to COROS cloud only. Your phone app must sync to push scheduled workouts to the watch. If the phone is offline, a newly scheduled workout may not appear on the watch until sync completes.
+The MCP never talks to the watch over Bluetooth. After scheduling, sync the COROS phone app.
+
+## Install
+
+```bash
+git clone https://github.com/ashvinrajasiri/coros_mcp.git
+cd coros_mcp
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+Updates on a machine that already has a clone:
+
+```bash
+cd /path/to/coros_mcp
+git pull
+source .venv/bin/activate
+pip install -e .
+# then reload MCP in the host (e.g. Hermes: /reload-mcp)
+```
 
 ## Environment variables
 
@@ -24,67 +42,88 @@ The MCP writes to COROS cloud only. Your phone app must sync to push scheduled w
 |---|---|---|---|
 | `COROS_EMAIL` | Yes | — | COROS account email |
 | `COROS_PASSWORD` | Yes | — | COROS account password |
-| `COROS_REGION` | No | `us` | API region: `us`, `eu`, or `cn` |
-| `COROS_DISTANCE_UNIT` | No | auto | Optional override: `km` or `mi`. If unset, uses your COROS account unit from login |
-| `COROS_TOKEN_CACHE` | No | — | Path to cache session token JSON across restarts |
+| `COROS_REGION` | No | `us` | `us`, `eu`, or `cn` (Canada → `us`) |
+| `COROS_DISTANCE_UNIT` | No | auto | Optional `km` or `mi`. If unset, uses your COROS account unit from login |
+| `COROS_TOKEN_CACHE` | No | — | Path to cache the session token across restarts |
 
-For multi-tool MCP sessions, set `COROS_TOKEN_CACHE` so the session token survives process restarts. Within a single server process, the module-level `CorosClient` singleton reuses the same client and keeps the token in memory across tool calls, avoiding repeated logins.
+Copy `.env.example` → `.env` for local scripts. **MCP hosts do not load project `.env`** — put credentials in the host config `env` block (below).
 
-Copy `.env.example` to `.env` for local development. **MCP hosts do not read project `.env` automatically** — each host must pass these variables when it starts the server (see config examples below).
+## Hermes setup
 
-## Install and run
+On the machine where Hermes runs (e.g. Mac mini), install the package (see above), then add a server entry. Examples:
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-coros-mcp
-```
+- YAML: [`docs/hermes-mcp.example.yaml`](docs/hermes-mcp.example.yaml)
+- JSON: [`docs/hermes-mcp.example.json`](docs/hermes-mcp.example.json)
 
-The `coros-mcp` console script starts the MCP server over stdio. Run tests with `pytest`.
+Point `command` at **this clone’s** `.venv/bin/coros-mcp`, and set `COROS_EMAIL` / `COROS_PASSWORD` / `COROS_REGION` in `env`.
 
-## MCP host configuration
+After `git pull`, run `pip install -e .` again if dependencies changed, then `/reload-mcp` in Hermes.
 
-Pass credentials in the host config, not in the repo.
+## Creating workouts with pace
 
-### Hermes / Claude Desktop
-
-Use [`docs/hermes-mcp.example.json`](docs/hermes-mcp.example.json) as a starting
-point. It uses this implementation worktree for development:
+Agents should send human paces, not raw COROS integers:
 
 ```json
 {
-  "mcpServers": {
-    "coros": {
-      "command": "/Users/ashvinrajasiri/workspace/coros_mcp/.worktrees/coros-mcp-impl/.venv/bin/coros-mcp",
-      "args": [],
-      "env": {
-        "COROS_EMAIL": "you@example.com",
-        "COROS_PASSWORD": "your-password",
-        "COROS_REGION": "us"
-      }
+  "name": "Easy 45min",
+  "sport": "run",
+  "steps": [
+    {
+      "type": "warmup",
+      "duration": { "unit": "time", "value": 10, "time_unit": "min" },
+      "target": { "kind": "pace", "low": "5:45", "high": "6:10", "unit": "min_per_km" }
+    },
+    {
+      "type": "steady",
+      "duration": { "unit": "time", "value": 25, "time_unit": "min" },
+      "target": { "kind": "pace", "low": "5:45", "high": "6:10", "unit": "min_per_km" }
+    },
+    {
+      "type": "cooldown",
+      "duration": { "unit": "time", "value": 10, "time_unit": "min" },
+      "target": { "kind": "pace", "low": "5:45", "high": "6:10", "unit": "min_per_km" }
     }
-  }
+  ]
 }
 ```
 
-After this branch is merged, create the virtual environment and install
-`coros-mcp` from the main repository checkout, then replace the worktree path
-with the corresponding main-repository `.venv/bin/coros-mcp` path.
+Also accepted: `"9:30/mi"`, `"5:45-6:10/km"`, or bare `"5:45"` (interpreted with the account’s unit).
 
-Adapt the config key names to your host if they differ (e.g. `mcp_servers` vs `mcpServers`).
+### What COROS stores (for debugging)
 
-## End-to-end checklist
+| Field | Meaning |
+|---|---|
+| `intensityType` | `3` = pace |
+| `intensityValue` / `intensityValueExtend` | **Seconds per kilometer** (e.g. `345` = 5:45/km) |
+| `intensityDisplayUnit` | Hub dropdown only: `1` = min/km, `2` = min/mi |
 
-Before relying on the server for training plans, validate the full COROS flow:
+Mile inputs are converted to seconds/km before upload. The dropdown unit follows your COROS account setting (override with `COROS_DISTANCE_UNIT`).
 
-1. Call `get_daily_metrics` for today.
-2. Call `list_activities` for the last 14 days.
-3. Call `create_workout` with a simple easy run.
-4. Call `schedule_workout` for tomorrow.
-5. Confirm the workout in COROS Training Hub.
-6. Sync the phone app and verify the workout reaches the watch.
+**Important:** Updating this MCP does not rewrite workouts already saved in COROS. Bad paces from older builds stay wrong until you recreate (and reschedule) those workouts.
+
+## Tools
+
+| Tool | Purpose |
+|---|---|
+| `get_daily_metrics` | Sleep / recovery-style daily metrics |
+| `list_activities` / `get_activity` | Completed activities |
+| `list_workouts` / `get_workout` / `create_workout` / `delete_workout` | Library |
+| `list_scheduled_workouts` / `schedule_workout` / `unschedule_workout` | Calendar |
+
+## Quick check
+
+1. `get_daily_metrics` for today  
+2. `create_workout` with a short easy run and pace targets  
+3. Confirm paces in Training Hub (e.g. `5'45"–6'10" min/km`)  
+4. `schedule_workout` → sync phone app → check watch  
 
 ## Design
 
-See `docs/superpowers/specs/2026-07-15-coros-mcp-design.md` for architecture, tool surface, and data models.
+See [`docs/superpowers/specs/2026-07-15-coros-mcp-design.md`](docs/superpowers/specs/2026-07-15-coros-mcp-design.md).
+
+## Dev
+
+```bash
+pip install -e ".[dev]"
+pytest
+```

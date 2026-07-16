@@ -148,7 +148,11 @@ def create_workout(name: str, sport: str, steps: list[dict]) -> dict:
             workout.steps, pace_store_as=pace_unit
         )
         payload = build_program_payload(
-            workout.name, program_sport_type, normalized_sport, intermediate_steps
+            workout.name,
+            program_sport_type,
+            normalized_sport,
+            intermediate_steps,
+            distance_unit=pace_unit,
         )
         workout_id = client.create_program(payload)
         return {

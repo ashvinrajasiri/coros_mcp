@@ -31,8 +31,8 @@ def intermediate_to_program_exercises(
 ) -> list[dict[str, Any]]:
     """Convert stable intermediate steps into COROS library-program exercises.
 
-    Pace targets are milliseconds in the selected unit:
-    miles → intensityDisplayUnit=1, km → intensityDisplayUnit=2.
+    Pace targets are always seconds per kilometer.
+    intensityDisplayUnit is the Hub dropdown: 1=min/km, 2=min/mi.
     """
     if sport not in {"run", "bike", "strength"}:
         raise ToolError(
@@ -52,20 +52,27 @@ def intermediate_to_program_exercises(
 
 
 def build_program_payload(
-    name: str, sport_type: int, sport: str, steps: Sequence[dict[str, Any]]
+    name: str,
+    sport_type: int,
+    sport: str,
+    steps: Sequence[dict[str, Any]],
+    *,
+    distance_unit: str = "km",
 ) -> dict[str, Any]:
     """Build the payload accepted by ``/training/program/add``."""
     exercises = intermediate_to_program_exercises(steps, sport=sport)
     total_seconds, total_centimeters = _estimated_totals(steps)
+    # COROS program ``unit``: 0 = metric, 1 = imperial (matches login account.unit).
+    program_unit = 1 if distance_unit == "mi" else 0
     return {
         "name": name,
         "sportType": sport_type,
-        "unit": 1,
+        "unit": program_unit,
         "pbVersion": 8,
         "overview": "",
         "estimatedTime": total_seconds,
         "estimatedDistance": total_centimeters,
-        "distanceDisplayUnit": 3,
+        "distanceDisplayUnit": 1 if distance_unit == "mi" else 2,
         "estimatedType": 6 if total_centimeters else 0,
         "targetType": 5 if total_centimeters else 2,
         "targetValue": total_centimeters if total_centimeters else total_seconds,
@@ -189,9 +196,12 @@ def _program_exercise(step: dict[str, Any], sort_no: int, sport: str) -> dict[st
             hint="Use warmup, training, interval, steady, cooldown, recovery, or repeat.",
         )
 
-    origin_id, template_name, overview = _exercise_template(step_type, sport)
+    duration_type = step.get("duration_type")
+    origin_id, template_name, overview = _exercise_template(
+        step_type, sport, duration_type=duration_type if isinstance(duration_type, str) else None
+    )
     target_type, target_value = _duration_target(
-        step.get("duration", 0), step.get("duration_type")
+        step.get("duration", 0), duration_type if isinstance(duration_type, str) else None
     )
     exercise = {
         "exerciseType": exercise_type,
@@ -223,16 +233,32 @@ def _program_exercise(step: dict[str, Any], sort_no: int, sport: str) -> dict[st
             "hrType": 0,
         }
         if target["kind"] == "pace":
-            updates["intensityDisplayUnit"] = target.get("intensity_display_unit", 2)
+            updates["intensityDisplayUnit"] = target.get("intensity_display_unit", 1)
         exercise.update(updates)
     return exercise
 
 
-def _exercise_template(step_type: str, sport: str) -> tuple[str, str, str]:
+def _exercise_template(
+    step_type: str, sport: str, *, duration_type: str | None = None
+) -> tuple[str, str, str]:
+    # Time-based warm/cool use non-_dist overviews; distance uses _dist variants.
+    use_dist = duration_type == "distance"
     templates = {
-        "warmup": ("425895398452936705", "T1120", "sid_run_warm_up_dist"),
-        "cooldown": ("425895456971866112", "T1122", "sid_run_cool_down_dist"),
-        "recovery": ("425895398452936705", "T1123", "sid_run_cool_down_dist"),
+        "warmup": (
+            "425895398452936705",
+            "T1120",
+            "sid_run_warm_up_dist" if use_dist else "sid_run_warm_up",
+        ),
+        "cooldown": (
+            "425895456971866112",
+            "T1122",
+            "sid_run_cool_down_dist" if use_dist else "sid_run_cool_down",
+        ),
+        "recovery": (
+            "425895398452936705",
+            "T1123",
+            "sid_run_cool_down_dist" if use_dist else "sid_run_cool_down",
+        ),
         "training": ("426109589008859136", "T3001", "sid_run_training"),
         "interval": ("426109589008859136", "T3001", "sid_run_training"),
         "steady": ("426109589008859136", "T3001", "sid_run_training"),
