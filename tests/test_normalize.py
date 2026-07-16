@@ -1,3 +1,6 @@
+import pytest
+
+from coros_mcp.errors import ToolError
 from coros_mcp.normalize import (
     normalize_activity_list_item,
     normalize_daily_metrics,
@@ -8,6 +11,13 @@ from coros_mcp.normalize import (
 
 def test_to_yyyymmdd_converts_iso_date():
     assert to_yyyymmdd("2024-03-09") == "20240309"
+
+
+def test_to_yyyymmdd_rejects_invalid_date():
+    with pytest.raises(ToolError) as exc_info:
+        to_yyyymmdd("2024-02-30")
+    assert exc_info.value.code == "VALIDATION_ERROR"
+    assert exc_info.value.hint == "Use YYYY-MM-DD"
 
 
 def test_normalize_activity_basic():

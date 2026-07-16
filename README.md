@@ -27,6 +27,8 @@ The MCP writes to COROS cloud only. Your phone app must sync to push scheduled w
 | `COROS_REGION` | No | `us` | API region: `us`, `eu`, or `cn` |
 | `COROS_TOKEN_CACHE` | No | — | Path to cache session token JSON across restarts |
 
+For multi-tool MCP sessions, set `COROS_TOKEN_CACHE` so the session token survives process restarts. Within a single server process, the module-level `CorosClient` singleton reuses the same client and keeps the token in memory across tool calls, avoiding repeated logins.
+
 Copy `.env.example` to `.env` for local development. **MCP hosts do not read project `.env` automatically** — each host must pass these variables when it starts the server (see config examples below).
 
 ## Install and run

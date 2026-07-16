@@ -24,9 +24,20 @@ load_dotenv()
 
 mcp = FastMCP("coros_mcp")
 
+_client: CorosClient | None = None
+
 
 def _get_client() -> CorosClient:
-    return CorosClient()
+    global _client
+    if _client is None:
+        _client = CorosClient()
+    return _client
+
+
+def _reset_client() -> None:
+    """Clear the module-level client singleton (for tests)."""
+    global _client
+    _client = None
 
 
 def _data_list(response: dict[str, Any]) -> list[dict[str, Any]]:
@@ -43,13 +54,7 @@ def get_daily_metrics(start_date: str, end_date: str | None = None) -> dict:
     except ToolError as error:
         return error_payload(error)
     except ConfigError as error:
-        return error_payload(
-            ToolError(
-                str(error),
-                code="AUTH_FAILED",
-                hint="Set COROS_EMAIL/PASSWORD in the MCP host env",
-            )
-        )
+        return _config_error_payload(error)
 
 
 @mcp.tool()
@@ -65,13 +70,7 @@ def list_activities(start_date: str, end_date: str) -> dict:
     except ToolError as error:
         return error_payload(error)
     except ConfigError as error:
-        return error_payload(
-            ToolError(
-                str(error),
-                code="AUTH_FAILED",
-                hint="Set COROS_EMAIL/PASSWORD in the MCP host env",
-            )
-        )
+        return _config_error_payload(error)
 
 
 @mcp.tool()
@@ -82,13 +81,7 @@ def get_activity(activity_id: str) -> dict:
     except ToolError as error:
         return error_payload(error)
     except ConfigError as error:
-        return error_payload(
-            ToolError(
-                str(error),
-                code="AUTH_FAILED",
-                hint="Set COROS_EMAIL/PASSWORD in the MCP host env",
-            )
-        )
+        return _config_error_payload(error)
 
 
 @mcp.tool()
@@ -112,7 +105,7 @@ def list_workouts(
     except ToolError as error:
         return error_payload(error)
     except ConfigError as error:
-        return _auth_error_payload(error)
+        return _config_error_payload(error)
 
 
 @mcp.tool()
@@ -123,7 +116,7 @@ def get_workout(workout_id: str) -> dict:
     except ToolError as error:
         return error_payload(error)
     except ConfigError as error:
-        return _auth_error_payload(error)
+        return _config_error_payload(error)
 
 
 @mcp.tool()
@@ -152,7 +145,7 @@ def create_workout(name: str, sport: str, steps: list[dict]) -> dict:
     except ToolError as error:
         return error_payload(error)
     except ConfigError as error:
-        return _auth_error_payload(error)
+        return _config_error_payload(error)
 
 
 @mcp.tool()
@@ -164,7 +157,7 @@ def delete_workout(workout_id: str) -> dict:
     except ToolError as error:
         return error_payload(error)
     except ConfigError as error:
-        return _auth_error_payload(error)
+        return _config_error_payload(error)
 
 
 @mcp.tool()
@@ -188,7 +181,7 @@ def list_scheduled_workouts(start_date: str, end_date: str) -> dict:
     except ToolError as error:
         return error_payload(error)
     except ConfigError as error:
-        return _auth_error_payload(error)
+        return _config_error_payload(error)
 
 
 @mcp.tool()
@@ -220,7 +213,7 @@ def schedule_workout(workout_id: str, date: str) -> dict:
     except ToolError as error:
         return error_payload(error)
     except ConfigError as error:
-        return _auth_error_payload(error)
+        return _config_error_payload(error)
 
 
 @mcp.tool()
@@ -266,7 +259,7 @@ def unschedule_workout(schedule_id: str) -> dict:
     except ToolError as error:
         return error_payload(error)
     except ConfigError as error:
-        return _auth_error_payload(error)
+        return _config_error_payload(error)
 
 
 def _schedule_programs_by_id(value: Any) -> dict[str, dict[str, Any]]:
@@ -279,10 +272,19 @@ def _schedule_programs_by_id(value: Any) -> dict[str, dict[str, Any]]:
     }
 
 
-def _auth_error_payload(error: ConfigError) -> dict:
+def _config_error_payload(error: ConfigError) -> dict:
+    message = str(error)
+    if "REGION" in message:
+        return error_payload(
+            ToolError(
+                message,
+                code="VALIDATION_ERROR",
+                hint="COROS_REGION must be one of: us, eu, cn",
+            )
+        )
     return error_payload(
         ToolError(
-            str(error),
+            message,
             code="AUTH_FAILED",
             hint="Set COROS_EMAIL/PASSWORD in the MCP host env",
         )

@@ -9,7 +9,14 @@ from coros_mcp.sports import type_to_sport
 
 def to_yyyymmdd(value: str) -> str:
     """Convert a public ISO date into the compact form used by COROS APIs."""
-    return date.fromisoformat(value).strftime("%Y%m%d")
+    try:
+        return date.fromisoformat(value).strftime("%Y%m%d")
+    except ValueError as error:
+        raise ToolError(
+            f"Invalid date: {value!r}",
+            code="VALIDATION_ERROR",
+            hint="Use YYYY-MM-DD",
+        ) from error
 
 
 def normalize_activity_list_item(raw: dict[str, Any]) -> dict[str, Any]:
