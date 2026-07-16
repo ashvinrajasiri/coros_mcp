@@ -117,10 +117,6 @@ Mile inputs are converted to seconds/km before upload. The dropdown unit follows
 3. Confirm paces in Training Hub (e.g. `5'45"–6'10" min/km`)  
 4. `schedule_workout` → sync phone app → check watch  
 
-## Design
-
-See [`docs/superpowers/specs/2026-07-15-coros-mcp-design.md`](docs/superpowers/specs/2026-07-15-coros-mcp-design.md).
-
 ## Dev
 
 ```bash
