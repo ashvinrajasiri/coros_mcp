@@ -1,5 +1,9 @@
 from coros_mcp.models import WorkoutCreate
-from coros_mcp.workouts import coros_steps_to_friendly, friendly_to_coros_steps
+from coros_mcp.workouts import (
+    coros_steps_to_friendly,
+    friendly_to_coros_steps,
+    intermediate_to_program_exercises,
+)
 
 
 def test_simple_timed_interval_maps_duration_seconds():
@@ -61,7 +65,9 @@ def test_repeat_nest_preserves_count_and_mapped_child_steps():
         {
             "type": "repeat",
             "count": 4,
-            "steps": [{"type": "steady", "duration": 120}],
+            "steps": [
+                {"type": "steady", "duration": 120, "duration_type": "time"}
+            ],
         }
     ]
 
@@ -85,6 +91,81 @@ def test_pace_target_maps_to_seconds_per_kilometer():
 
     assert steps[0]["duration"] == 100000
     assert steps[0]["target"] == {"kind": "pace", "target_low": 270}
+
+
+def test_intermediate_steps_become_timed_program_exercises():
+    exercises = intermediate_to_program_exercises(
+        [
+            {"type": "warmup", "duration": 600},
+            {"type": "steady", "duration": 1800},
+            {"type": "cooldown", "duration": 300},
+        ],
+        sport="run",
+    )
+
+    assert [
+        (exercise["exerciseType"], exercise["targetType"], exercise["targetValue"])
+        for exercise in exercises
+    ] == [(1, 2, 600), (2, 2, 1800), (3, 2, 300)]
+    assert [exercise["sortNo"] for exercise in exercises] == [
+        16_777_216,
+        33_554_432,
+        50_331_648,
+    ]
+
+
+def test_distance_duration_remains_distance_for_short_segments():
+    workout = WorkoutCreate.model_validate(
+        {
+            "name": "Strides",
+            "sport": "run",
+            "steps": [
+                {
+                    "type": "steady",
+                    "duration": {"unit": "distance", "value": 50, "distance_unit": "m"},
+                }
+            ],
+        }
+    )
+
+    exercises = intermediate_to_program_exercises(
+        friendly_to_coros_steps(workout.steps), sport="run"
+    )
+
+    assert exercises[0]["targetType"] == 5
+    assert exercises[0]["targetValue"] == 5000
+
+
+def test_intermediate_repeat_becomes_group_with_timed_children():
+    exercises = intermediate_to_program_exercises(
+        [
+            {
+                "type": "repeat",
+                "count": 3,
+                "steps": [
+                    {"type": "steady", "duration": 120},
+                    {"type": "recovery", "duration": 60},
+                ],
+            }
+        ],
+        sport="run",
+    )
+
+    assert exercises[0] == {
+        "exerciseType": 0,
+        "sortNo": 16_777_216,
+        "isGroup": True,
+        "sets": 3,
+        "groupId": 16_777_216,
+    }
+    assert [
+        (exercise["exerciseType"], exercise["targetType"], exercise["targetValue"])
+        for exercise in exercises[1:]
+    ] == [(2, 2, 120), (4, 2, 60)]
+    assert [exercise["sortNo"] for exercise in exercises[1:]] == [
+        16_842_752,
+        16_908_288,
+    ]
 
 
 def test_simple_timed_steps_roundtrip_to_friendly_models():

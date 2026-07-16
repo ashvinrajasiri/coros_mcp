@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import json
 from typing import Any
 
 import httpx
@@ -60,12 +61,20 @@ class CorosClient:
             self._request("GET", "/activity/detail", params={"labelId": activity_id})
         )
 
-    def list_programs(self) -> list[dict]:
-        data = self._request("GET", "/training/program/query")
+    def list_programs(self, sport_type: int | None = None) -> list[dict]:
+        payload: dict[str, Any] = {
+            "name": "",
+            "supportRestExercise": 1,
+            "startNo": 0,
+            "limitSize": 100,
+        }
+        if sport_type is not None:
+            payload["sportType"] = sport_type
+        data = self._request("POST", "/training/program/query", json=payload)
         if isinstance(data, list):
             return [item for item in data if isinstance(item, dict)]
         if isinstance(data, Mapping):
-            for key in ("list", "items", "programs"):
+            for key in ("dataList", "list", "items", "programs"):
                 values = data.get(key)
                 if isinstance(values, list):
                     return [item for item in values if isinstance(item, dict)]
@@ -74,20 +83,19 @@ class CorosClient:
     def get_program(self, program_id: str) -> dict:
         return self._as_dict(
             self._request(
-                "GET", "/training/program/query", params={"programId": program_id}
+                "GET", "/training/program/detail", params={"id": program_id}
             )
         )
 
-    def create_program(self, payload: dict) -> dict:
-        # Confirm Task 7: live COROS program creation may instead use workout/create.
-        return self._as_dict(
-            self._request("POST", "/training/program/create", json=payload)
-        )
+    def create_program(self, payload: dict) -> str:
+        data = self._request("POST", "/training/program/add", json=payload)
+        return str(data)
 
     def delete_program(self, program_id: str) -> None:
-        # Confirm Task 7: deletion endpoint and expected identifier shape.
         self._request(
-            "POST", "/training/program/delete", json={"programId": program_id}
+            "POST",
+            "/training/program/delete",
+            content=json.dumps([program_id]),
         )
 
     def query_schedule(self, start: str, end: str) -> dict:
@@ -110,7 +118,8 @@ class CorosClient:
         path: str,
         *,
         params: dict[str, Any] | None = None,
-        json: dict[str, Any] | None = None,
+        json: Any = None,
+        content: str | bytes | None = None,
     ) -> Any:
         for attempt in range(2):
             self.ensure_auth()
@@ -121,6 +130,7 @@ class CorosClient:
                     headers=self._auth.headers(),
                     params=params,
                     json=json,
+                    content=content,
                 )
             except httpx.HTTPError as error:
                 raise ToolError(

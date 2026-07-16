@@ -79,3 +79,41 @@ def test_get_day_detail_retries_once_after_401():
         "/account/login",
         "/analyse/dayDetail/query",
     ]
+
+
+def test_program_client_uses_verified_library_endpoints():
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/account/login":
+            return httpx.Response(
+                200, json={"result": "0000", "data": {"accessToken": "token"}}
+            )
+        if request.url.path == "/training/program/add":
+            return httpx.Response(200, json={"result": "0000", "data": "program-1"})
+        return httpx.Response(200, json={"result": "0000", "data": []})
+
+    client = CorosClient(Config(email="athlete@example.com", password="password"))
+    client._client = httpx.Client(transport=httpx.MockTransport(handler))
+    try:
+        assert client.list_programs(1) == []
+        assert client.get_program("program-1") == {}
+        assert client.create_program({"name": "Easy"}) == "program-1"
+        client.delete_program("123456789012345678")
+    finally:
+        client.close()
+
+    library_requests = [
+        request for request in requests if request.url.path != "/account/login"
+    ]
+    assert library_requests[0].method == "POST"
+    assert library_requests[0].url.path == "/training/program/query"
+    assert library_requests[0].content == (
+        b'{"name":"","supportRestExercise":1,"startNo":0,"limitSize":100,"sportType":1}'
+    )
+    assert library_requests[1].url.path == "/training/program/detail"
+    assert dict(library_requests[1].url.params) == {"id": "program-1"}
+    assert library_requests[2].url.path == "/training/program/add"
+    assert library_requests[3].url.path == "/training/program/delete"
+    assert library_requests[3].content == b'["123456789012345678"]'

@@ -18,6 +18,12 @@ SPORT_TYPES = {
     "walk": 900,
 }
 
+PROGRAM_SPORT_TYPES = {
+    "run": 1,
+    "bike": 2,
+    "strength": 4,
+}
+
 _TYPE_TO_SPORT = {
     sport_type: sport
     for sport, sport_type in SPORT_TYPES.items()
@@ -34,6 +40,19 @@ def sport_to_type(sport: str) -> int:
             f"Unsupported sport: {sport}",
             code="VALIDATION_ERROR",
             hint=f"Use one of: {', '.join(sorted(SPORT_TYPES))}",
+        ) from error
+
+
+def program_sport_to_type(sport: str) -> int:
+    """Return the COROS library-program sport type, distinct from activities."""
+    normalized = sport.strip().lower()
+    try:
+        return PROGRAM_SPORT_TYPES[normalized]
+    except KeyError as error:
+        raise ToolError(
+            f"Unsupported program sport: {sport}",
+            code="VALIDATION_ERROR",
+            hint=f"Use one of: {', '.join(sorted(PROGRAM_SPORT_TYPES))}",
         ) from error
 
 

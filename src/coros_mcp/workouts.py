@@ -21,6 +21,57 @@ def friendly_to_coros_steps(steps: Sequence[WorkoutStep]) -> list[dict[str, Any]
     return [_friendly_step_to_coros(step) for step in steps]
 
 
+def intermediate_to_program_exercises(
+    steps: Sequence[dict[str, Any]], *, sport: str
+) -> list[dict[str, Any]]:
+    """Convert stable intermediate steps into COROS library-program exercises.
+
+    Pace target values are seconds per kilometer multiplied by 1000, matching
+    the convention used by community COROS program clients.
+    """
+    if sport not in {"run", "bike", "strength"}:
+        raise ToolError(
+            f"Cannot map library-program steps for sport: {sport}",
+            code="UNSUPPORTED_SPORT_STEP",
+            hint="Use run, bike, or strength.",
+        )
+
+    exercises: list[dict[str, Any]] = []
+    for index, step in enumerate(steps, start=1):
+        sort_no = 16_777_216 * index
+        if step["type"] == "repeat":
+            _append_repeat_exercises(exercises, step, sort_no, sport)
+        else:
+            exercises.append(_program_exercise(step, sort_no, sport))
+    return exercises
+
+
+def build_program_payload(
+    name: str, sport_type: int, sport: str, steps: Sequence[dict[str, Any]]
+) -> dict[str, Any]:
+    """Build the payload accepted by ``/training/program/add``."""
+    exercises = intermediate_to_program_exercises(steps, sport=sport)
+    total_seconds, total_centimeters = _estimated_totals(steps)
+    return {
+        "name": name,
+        "sportType": sport_type,
+        "unit": 1,
+        "pbVersion": 8,
+        "overview": "",
+        "estimatedTime": total_seconds,
+        "estimatedDistance": total_centimeters,
+        "distanceDisplayUnit": 3,
+        "estimatedType": 6 if total_centimeters else 0,
+        "targetType": 5 if total_centimeters else 2,
+        "targetValue": total_centimeters if total_centimeters else total_seconds,
+        "simple": False,
+        "access": 1,
+        "exerciseNum": len(exercises),
+        "totalSets": len(exercises),
+        "exercises": exercises,
+    }
+
+
 def coros_steps_to_friendly(steps: Sequence[dict[str, Any]]) -> list[WorkoutStep]:
     """Map intermediate COROS-shaped steps back to friendly Pydantic models."""
     return [_coros_step_to_friendly(step) for step in steps]
@@ -43,6 +94,7 @@ def _friendly_step_to_coros(step: WorkoutStep) -> dict[str, Any]:
     mapped: dict[str, Any] = {"type": step.type}
     if step.duration is not None:
         mapped["duration"] = _duration_to_coros(step.duration)
+        mapped["duration_type"] = step.duration.unit
     if step.target is not None:
         mapped["target"] = _target_to_coros(step.target)
     return mapped
@@ -94,6 +146,131 @@ def _target_to_coros(target: Target) -> dict[str, Any]:
     return mapped
 
 
+def _append_repeat_exercises(
+    exercises: list[dict[str, Any]], step: dict[str, Any], parent_sort: int, sport: str
+) -> None:
+    exercises.append(
+        {
+            "exerciseType": 0,
+            "sortNo": parent_sort,
+            "isGroup": True,
+            "sets": step["count"],
+            "groupId": parent_sort,
+        }
+    )
+    for index, child in enumerate(step["steps"], start=1):
+        if child["type"] == "repeat":
+            raise ToolError(
+                "Nested repeat groups are not supported by COROS programs.",
+                code="UNSUPPORTED_SPORT_STEP",
+                hint="Use a single repeat level.",
+            )
+        exercise = _program_exercise(child, parent_sort + 65_536 * index, sport)
+        exercise.update({"isGroup": False, "sets": 1, "groupId": parent_sort})
+        exercises.append(exercise)
+
+
+def _program_exercise(step: dict[str, Any], sort_no: int, sport: str) -> dict[str, Any]:
+    step_type = step["type"]
+    exercise_type = {
+        "warmup": 1,
+        "cooldown": 3,
+        "recovery": 4,
+        "training": 2,
+        "interval": 2,
+        "steady": 2,
+    }.get(step_type)
+    if exercise_type is None:
+        raise ToolError(
+            f"Unsupported {sport} workout step: {step_type}",
+            code="UNSUPPORTED_SPORT_STEP",
+            hint="Use warmup, training, interval, steady, cooldown, recovery, or repeat.",
+        )
+
+    origin_id, template_name, overview = _exercise_template(step_type, sport)
+    target_type, target_value = _duration_target(
+        step.get("duration", 0), step.get("duration_type")
+    )
+    exercise = {
+        "exerciseType": exercise_type,
+        "targetType": target_type,
+        "targetValue": target_value,
+        "intensityType": 0,
+        "intensityValue": 0,
+        "intensityValueExtend": 0,
+        "sortNo": sort_no,
+        "originId": origin_id,
+        "name": template_name,
+        "overview": overview,
+    }
+    if target := step.get("target"):
+        intensity_type = {"hr": 2, "pace": 3, "power": 6}.get(target["kind"])
+        if intensity_type is None:
+            raise ToolError(
+                f"Unsupported intensity target: {target['kind']}",
+                code="UNSUPPORTED_SPORT_STEP",
+                hint="Use hr, pace, or power.",
+            )
+        low = target["target_low"]
+        high = target.get("target_high", low)
+        multiplier = 1000 if target["kind"] == "pace" else 1
+        exercise.update(
+            {
+                "intensityType": intensity_type,
+                "intensityValue": _compact_number(low * multiplier),
+                "intensityValueExtend": _compact_number(high * multiplier),
+            }
+        )
+    return exercise
+
+
+def _exercise_template(step_type: str, sport: str) -> tuple[str, str, str]:
+    templates = {
+        "warmup": ("425895398452936705", "T1120", "sid_run_warm_up_dist"),
+        "cooldown": ("425895456971866112", "T1122", "sid_run_cool_down_dist"),
+        "recovery": ("425895398452936705", "T1123", "sid_run_cool_down_dist"),
+        "training": ("426109589008859136", "T3001", "sid_run_training"),
+        "interval": ("426109589008859136", "T3001", "sid_run_training"),
+        "steady": ("426109589008859136", "T3001", "sid_run_training"),
+    }
+    origin_id, name, overview = templates[step_type]
+    if sport == "bike" and step_type in {"training", "interval", "steady"}:
+        overview = "sid_bike_training"
+    return origin_id, name, overview
+
+
+def _duration_target(
+    duration: int | float, duration_type: str | None = None
+) -> tuple[int, int | float]:
+    if not duration:
+        return 1, 0
+    if duration_type == "distance":
+        return 5, duration
+    if duration_type == "time":
+        return 2, duration
+    # Keep supporting intermediates saved before duration_type was introduced.
+    return (5, duration) if duration >= 10_000 else (2, duration)
+
+
+def _estimated_totals(steps: Sequence[dict[str, Any]]) -> tuple[int | float, int | float]:
+    seconds: int | float = 0
+    centimeters: int | float = 0
+    for step in steps:
+        if step["type"] == "repeat":
+            nested_seconds, nested_centimeters = _estimated_totals(step["steps"])
+            seconds += nested_seconds * step["count"]
+            centimeters += nested_centimeters * step["count"]
+            continue
+        duration = step.get("duration", 0)
+        if step.get("duration_type") == "distance" or (
+            step.get("duration_type") is None and duration >= 10_000
+        ):
+            centimeters += duration
+        else:
+            seconds += duration
+    return _compact_number(seconds), _compact_number(centimeters)
+
+
 def _pace_to_seconds_per_km(value: str | float | int) -> int:
     if isinstance(value, (int, float)):
         if value <= 0:
@@ -137,5 +314,5 @@ def _coros_step_to_friendly(step: dict[str, Any]) -> WorkoutStep:
     return WorkoutStep(type=step_type, duration=duration)
 
 
-def _compact_number(value: float) -> int | float:
-    return int(value) if value.is_integer() else value
+def _compact_number(value: int | float) -> int | float:
+    return int(value) if isinstance(value, float) and value.is_integer() else value
