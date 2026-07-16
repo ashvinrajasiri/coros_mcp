@@ -158,13 +158,36 @@ Mile inputs are converted to seconds/km before upload. The dropdown unit follows
 
 **Important:** Updating this MCP does not rewrite workouts already saved in COROS. Bad paces from older builds stay wrong until you recreate (and reschedule) those workouts.
 
+## Strength workouts
+
+Strength uses the live COROS exercise catalog (~380 moves), not free-text step names.
+
+1. `search_strength_exercises("push")` → pick a catalog name  
+2. `create_strength_workout` with reps or timed holds  
+3. `schedule_workout` as usual  
+
+```json
+{
+  "name": "Quick Push",
+  "sets": 3,
+  "exercises": [
+    { "name": "Push Ups", "reps": 12, "rest_sec": 45 },
+    { "name": "Planks", "duration_sec": 40, "rest_sec": 30 },
+    { "name": "Squats", "reps": 15, "rest_sec": 45 }
+  ]
+}
+```
+
+`sets` repeats the whole circuit. Bodyweight for now (no weight targets yet).
+
 ## Tools
 
 | Tool | Purpose |
 |---|---|
 | `get_daily_metrics` | Sleep / recovery-style daily metrics |
 | `list_activities` / `get_activity` | Completed activities |
-| `list_workouts` / `get_workout` / `create_workout` / `delete_workout` | Library |
+| `list_workouts` / `get_workout` / `create_workout` / `delete_workout` | Run/bike-style library |
+| `search_strength_exercises` / `create_strength_workout` | Strength catalog + create |
 | `list_scheduled_workouts` / `schedule_workout` / `unschedule_workout` | Calendar |
 
 ## Quick check

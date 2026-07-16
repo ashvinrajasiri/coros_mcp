@@ -113,6 +113,22 @@ class CorosClient:
             hint="Try creating the workout again.",
         )
 
+    def list_exercises(self, sport_type: int = 4) -> list[dict]:
+        """Fetch the Training Hub exercise catalog (sport_type 4 = strength)."""
+        data = self._request(
+            "GET",
+            "/training/exercise/query",
+            params={"sportType": sport_type},
+        )
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+        if isinstance(data, Mapping):
+            for key in ("dataList", "list", "items", "exercises"):
+                values = data.get(key)
+                if isinstance(values, list):
+                    return [item for item in values if isinstance(item, dict)]
+        return []
+
     def delete_program(self, program_id: str) -> None:
         self._request(
             "POST",

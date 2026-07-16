@@ -18,6 +18,10 @@ from coros_mcp.normalize import (
     to_yyyymmdd,
 )
 from coros_mcp.sports import program_sport_to_type
+from coros_mcp.strength import (
+    build_strength_program_payload,
+    search_catalog,
+)
 from coros_mcp.workouts import build_program_payload, friendly_to_coros_steps
 
 load_dotenv()
@@ -169,6 +173,49 @@ def create_workout(name: str, sport: str, steps: list[dict]) -> dict:
                 hint=str(error.errors()[0]["msg"]),
             )
         )
+    except ToolError as error:
+        return error_payload(error)
+    except ConfigError as error:
+        return _config_error_payload(error)
+
+
+@mcp.tool()
+def search_strength_exercises(query: str, limit: int = 20) -> dict:
+    """Search the COROS strength exercise catalog by name (e.g. 'push', 'squat')."""
+    try:
+        catalog = _get_client().list_exercises(sport_type=4)
+        return {"exercises": search_catalog(catalog, query, limit=limit)}
+    except ToolError as error:
+        return error_payload(error)
+    except ConfigError as error:
+        return _config_error_payload(error)
+
+
+@mcp.tool()
+def create_strength_workout(
+    name: str, exercises: list[dict], sets: int = 1
+) -> dict:
+    """Create a strength library workout from catalog exercises.
+
+    Each exercise: ``{name, reps}`` or ``{name, duration_sec}``, optional
+    ``rest_sec`` (default 60). ``name`` is a human catalog name from
+    ``search_strength_exercises`` (or ``origin_id``). ``sets`` repeats the
+    whole circuit. Schedule afterward with ``schedule_workout``.
+    """
+    try:
+        client = _get_client()
+        catalog = client.list_exercises(sport_type=4)
+        payload = build_strength_program_payload(
+            name, exercises, catalog=catalog, sets=sets
+        )
+        workout_id = client.create_program(payload)
+        return {
+            "id": workout_id,
+            "name": name,
+            "sport": "strength",
+            "sets": sets,
+            "exercise_count": len(exercises),
+        }
     except ToolError as error:
         return error_payload(error)
     except ConfigError as error:
