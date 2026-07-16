@@ -7,6 +7,10 @@ class FakeClient:
         self.deleted_id: str | None = None
         self.list_arg: int | None = None
 
+    @property
+    def distance_unit(self) -> str:
+        return "km"
+
     def list_programs(self, sport_type: int | None = None) -> list[dict]:
         self.list_arg = sport_type
         return [{"id": "workout-1", "name": "Morning Run"}]
@@ -39,7 +43,12 @@ def test_create_workout_maps_run_steps_and_creates_program(monkeypatch):
         ],
     )
 
-    assert result == {"id": "workout-1", "name": "Easy Run", "sport": "run"}
+    assert result == {
+        "id": "workout-1",
+        "name": "Easy Run",
+        "sport": "run",
+        "distance_unit": "km",
+    }
     assert client.created_payload is not None
     assert client.created_payload["sportType"] == 1
     assert client.created_payload["exercises"][0]["targetType"] == 2

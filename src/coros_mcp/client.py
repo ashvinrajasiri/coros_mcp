@@ -30,6 +30,14 @@ class CorosClient:
             if error.code != "UNAUTHORIZED":
                 raise
             self._auth.login(self._client)
+        if self._auth.account_unit is None:
+            self._auth.refresh_account_unit(self._client)
+
+    @property
+    def distance_unit(self) -> str:
+        """km or mi from account settings (or COROS_DISTANCE_UNIT override)."""
+        self.ensure_auth()
+        return self._auth.distance_unit
 
     def close(self) -> None:
         self._client.close()

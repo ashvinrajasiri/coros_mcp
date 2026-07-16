@@ -18,4 +18,12 @@ def test_load_config_defaults_region(monkeypatch):
     assert cfg.email == "a@b.com"
     assert cfg.password == "secret"
     assert cfg.region == "us"
-    assert cfg.distance_unit == "km"
+    assert cfg.distance_unit is None
+
+
+def test_load_config_distance_unit_override(monkeypatch):
+    monkeypatch.setenv("COROS_EMAIL", "a@b.com")
+    monkeypatch.setenv("COROS_PASSWORD", "secret")
+    monkeypatch.setenv("COROS_DISTANCE_UNIT", "mi")
+    cfg = load_config()
+    assert cfg.distance_unit == "mi"

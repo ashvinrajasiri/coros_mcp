@@ -11,7 +11,9 @@ _SECONDS_PER_TIME_UNIT = {"sec": 1, "min": 60}
 _CENTIMETERS_PER_DISTANCE_UNIT = {"m": 100, "km": 100_000, "mi": 160_934.4}
 
 
-def friendly_to_coros_steps(steps: Sequence[WorkoutStep]) -> list[dict[str, Any]]:
+def friendly_to_coros_steps(
+    steps: Sequence[WorkoutStep], *, pace_store_as: str | None = None
+) -> list[dict[str, Any]]:
     """Map friendly steps into the stable intermediate COROS-shaped convention.
 
     Timed and distance durations use the ``duration`` key in seconds and
@@ -19,7 +21,9 @@ def friendly_to_coros_steps(steps: Sequence[WorkoutStep]) -> list[dict[str, Any]
     ``target_low`` and optional ``target_high`` keys. Task 7 will adapt this
     convention to the live COROS API payload.
     """
-    return [_friendly_step_to_coros(step) for step in steps]
+    return [
+        _friendly_step_to_coros(step, pace_store_as=pace_store_as) for step in steps
+    ]
 
 
 def intermediate_to_program_exercises(
@@ -78,7 +82,9 @@ def coros_steps_to_friendly(steps: Sequence[dict[str, Any]]) -> list[WorkoutStep
     return [_coros_step_to_friendly(step) for step in steps]
 
 
-def _friendly_step_to_coros(step: WorkoutStep) -> dict[str, Any]:
+def _friendly_step_to_coros(
+    step: WorkoutStep, *, pace_store_as: str | None = None
+) -> dict[str, Any]:
     if step.type == "repeat":
         if step.count is None or step.count < 1 or not step.steps:
             raise ToolError(
@@ -89,7 +95,7 @@ def _friendly_step_to_coros(step: WorkoutStep) -> dict[str, Any]:
         return {
             "type": "repeat",
             "count": step.count,
-            "steps": friendly_to_coros_steps(step.steps),
+            "steps": friendly_to_coros_steps(step.steps, pace_store_as=pace_store_as),
         }
 
     mapped: dict[str, Any] = {"type": step.type}
@@ -97,7 +103,7 @@ def _friendly_step_to_coros(step: WorkoutStep) -> dict[str, Any]:
         mapped["duration"] = _duration_to_coros(step.duration)
         mapped["duration_type"] = step.duration.unit
     if step.target is not None:
-        mapped["target"] = _target_to_coros(step.target)
+        mapped["target"] = _target_to_coros(step.target, pace_store_as=pace_store_as)
     return mapped
 
 
@@ -126,9 +132,13 @@ def _duration_to_coros(duration: Duration) -> int | float:
     return _compact_number(duration.value * _CENTIMETERS_PER_DISTANCE_UNIT[unit])
 
 
-def _target_to_coros(target: Target) -> dict[str, Any]:
+def _target_to_coros(
+    target: Target, *, pace_store_as: str | None = None
+) -> dict[str, Any]:
     if target.kind == "pace":
-        return parse_pace_target(target.low, target.high, unit=target.unit)
+        return parse_pace_target(
+            target.low, target.high, unit=target.unit, store_as=pace_store_as  # type: ignore[arg-type]
+        )
 
     mapped = {"kind": target.kind, "target_low": target.low}
     if target.high is not None:

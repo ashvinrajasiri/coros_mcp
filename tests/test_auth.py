@@ -52,7 +52,11 @@ def test_login_saves_token_cache_and_uses_hashed_password(tmp_path):
             200,
             json={
                 "result": "0000",
-                "data": {"accessToken": "cached-token", "userId": "user-123"},
+                "data": {
+                    "accessToken": "cached-token",
+                    "userId": "user-123",
+                    "unit": 0,
+                },
             },
         )
 
@@ -74,10 +78,13 @@ def test_login_saves_token_cache_and_uses_hashed_password(tmp_path):
     assert headers["accessToken"] == "cached-token"
     assert headers["content-type"] == "application/json"
     assert json.loads(headers["yfheader"]) == {"userId": "user-123"}
+    assert session.account_unit == 0
+    assert session.distance_unit == "km"
     assert json.loads(cache_path.read_text()) == {
         "access_token": "cached-token",
         "user_id": "user-123",
         "region": "us",
+        "account_unit": 0,
     }
 
 

@@ -40,18 +40,22 @@ _DISPLAY_UNIT_KM = 2
 DistanceUnit = Literal["km", "mi"]
 
 
-def distance_unit_preference() -> DistanceUnit:
-    """Return the unit COROS workouts should store/display (from env)."""
-    raw = os.environ.get("COROS_DISTANCE_UNIT", "km").strip().lower()
+def distance_unit_preference(store_as: DistanceUnit | None = None) -> DistanceUnit:
+    """Return unit for storing paces.
+
+    Prefer an explicit ``store_as`` (from the authenticated COROS account).
+    ``COROS_DISTANCE_UNIT`` remains an optional override via callers that pass
+    ``store_as`` from config. Bare env reads are only a last-resort fallback
+    for unit tests that don't wire a client.
+    """
+    if store_as in {"km", "mi"}:
+        return store_as
+    raw = os.environ.get("COROS_DISTANCE_UNIT", "").strip().lower()
     if raw in {"mi", "mile", "miles", "imperial"}:
         return "mi"
-    if raw in {"km", "kilometer", "kilometers", "metric", ""}:
+    if raw in {"km", "kilometer", "kilometers", "metric"}:
         return "km"
-    raise ToolError(
-        f"Invalid COROS_DISTANCE_UNIT: {raw!r}",
-        code="VALIDATION_ERROR",
-        hint="Use COROS_DISTANCE_UNIT=km or mi (match your COROS app setting).",
-    )
+    return "km"
 
 
 def parse_pace_target(
@@ -67,16 +71,16 @@ def parse_pace_target(
     if isinstance(low, str):
         text = low.strip()
         if "/" in text or (high is None and re.search(r"[-–]", text)):
-            return _finalize(_parse_pace_string_raw(text), preferred)
+            return _finalize(_parse_pace_string_raw(text, preferred=preferred), preferred)
 
     if isinstance(low, str) and ":" in str(low):
-        input_unit = _normalize_input_unit(unit)
+        input_unit = _normalize_input_unit(unit, preferred=preferred)
         low_ms = _mmss_to_ms(str(low))
         high_ms = _mmss_to_ms(str(high)) if high is not None else low_ms
         return _finalize((low_ms, high_ms, input_unit), preferred)
 
     if isinstance(low, (int, float)):
-        input_unit = _normalize_input_unit(unit)
+        input_unit = _normalize_input_unit(unit, preferred=preferred)
         low_ms = _seconds_to_ms(float(low))
         high_ms = _seconds_to_ms(float(high)) if high is not None else low_ms
         return _finalize((low_ms, high_ms, input_unit), preferred)
@@ -88,7 +92,9 @@ def parse_pace_target(
     )
 
 
-def _parse_pace_string_raw(text: str) -> tuple[int, int, DistanceUnit]:
+def _parse_pace_string_raw(
+    text: str, *, preferred: DistanceUnit
+) -> tuple[int, int, DistanceUnit]:
     match = _PACE_RE.match(text.strip())
     if not match:
         raise ToolError(
@@ -105,7 +111,7 @@ def _parse_pace_string_raw(text: str) -> tuple[int, int, DistanceUnit]:
             code="VALIDATION_ERROR",
             hint="Seconds must be 0-59.",
         )
-    input_unit = _normalize_input_unit(match["unit"])
+    input_unit = _normalize_input_unit(match["unit"], preferred=preferred)
     low_ms = _pace_parts_to_ms(min1, sec1)
 
     min2_raw = match["min2"]
@@ -143,10 +149,12 @@ def _convert_ms(ms: int, *, from_unit: DistanceUnit, to_unit: DistanceUnit) -> i
     return int(round(ms * _METERS_PER_MILE / 1000.0))
 
 
-def _normalize_input_unit(unit: str | None) -> DistanceUnit:
+def _normalize_input_unit(
+    unit: str | None, *, preferred: DistanceUnit
+) -> DistanceUnit:
     if unit is None or str(unit).strip() == "":
         # Bare MM:SS with no unit → interpret using athlete preference.
-        return distance_unit_preference()
+        return preferred
     unit_raw = str(unit).strip().lower()
     if unit_raw in _MI_UNITS:
         return "mi"

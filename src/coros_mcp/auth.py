@@ -3,13 +3,17 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
 from coros_mcp.config import Config
 from coros_mcp.errors import ToolError
 
+DistanceUnit = Literal["km", "mi"]
+
+# COROS login `unit` field: 0 = metric, 1 = imperial (matches Training Hub profile).
+_ACCOUNT_UNIT_IMPERIAL = 1
 
 _REGION_BASE_URLS = {
     "us": "https://teamapi.coros.com",
@@ -35,12 +39,27 @@ def base_url_for_region(region: str) -> str:
         ) from exc
 
 
+def account_unit_to_distance_unit(account_unit: int | None) -> DistanceUnit:
+    """Map COROS account unit preference to km/mi."""
+    if account_unit == _ACCOUNT_UNIT_IMPERIAL:
+        return "mi"
+    return "km"
+
+
 class AuthSession:
     def __init__(self, config: Config):
         self._config = config
         self._access_token: str | None = None
         self.user_id: str | None = None
+        self.account_unit: int | None = None
         self._load_token_cache()
+
+    @property
+    def distance_unit(self) -> DistanceUnit:
+        """Resolved pace/distance unit: env override, else account setting, else km."""
+        if self._config.distance_unit in {"km", "mi"}:
+            return self._config.distance_unit  # type: ignore[return-value]
+        return account_unit_to_distance_unit(self.account_unit)
 
     def headers(self) -> dict[str, str]:
         if not self._access_token:
@@ -91,17 +110,53 @@ class AuthSession:
         self._access_token = access_token
         user_id = data.get("userId")
         self.user_id = str(user_id) if user_id is not None else None
+        self._apply_account_unit(data.get("unit") if isinstance(data, dict) else None)
+        # Login always establishes a preference; default metric if field absent.
+        if self.account_unit is None:
+            self.account_unit = 0
+        self._save_token_cache()
+
+    def refresh_account_unit(self, client: httpx.Client) -> None:
+        """Fetch account unit preference when missing from an older token cache."""
+        if self.account_unit is not None:
+            return
+        try:
+            response = client.get(
+                f"{base_url_for_region(self._config.region)}/account/query",
+                headers=self.headers(),
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except (httpx.HTTPError, ValueError, ToolError):
+            self.account_unit = 0
+            return
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if isinstance(data, dict):
+            self._apply_account_unit(data.get("unit"))
+        if self.account_unit is None:
+            self.account_unit = 0
         self._save_token_cache()
 
     def clear(self) -> None:
         self._access_token = None
         self.user_id = None
+        self.account_unit = None
         cache_path = self._cache_path()
         if cache_path is not None:
             try:
                 cache_path.unlink()
             except FileNotFoundError:
                 pass
+
+    def _apply_account_unit(self, value: Any) -> None:
+        if isinstance(value, bool):
+            self.account_unit = int(value)
+        elif isinstance(value, int):
+            self.account_unit = value
+        elif isinstance(value, str) and value.strip().isdigit():
+            self.account_unit = int(value.strip())
+        else:
+            self.account_unit = None
 
     def _cache_path(self) -> Path | None:
         return Path(self._config.token_cache) if self._config.token_cache else None
@@ -130,17 +185,20 @@ class AuthSession:
         self._access_token = access_token
         user_id = payload.get("user_id") or payload.get("userId")
         self.user_id = str(user_id) if user_id is not None else None
+        self._apply_account_unit(payload.get("account_unit"))
 
     def _save_token_cache(self) -> None:
         cache_path = self._cache_path()
         if cache_path is None or self._access_token is None:
             return
 
-        payload: dict[str, str] = {
+        payload: dict[str, Any] = {
             "access_token": self._access_token,
             "region": self._config.region,
         }
         if self.user_id is not None:
             payload["user_id"] = self.user_id
+        if self.account_unit is not None:
+            payload["account_unit"] = self.account_unit
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         cache_path.write_text(json.dumps(payload))

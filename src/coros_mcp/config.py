@@ -14,7 +14,8 @@ class Config:
     password: str
     region: str = "us"
     token_cache: str | None = None
-    distance_unit: str = "km"
+    # None = auto-detect from COROS account login `unit` field
+    distance_unit: str | None = None
 
 
 def load_config() -> Config:
@@ -28,13 +29,18 @@ def load_config() -> Config:
     if region not in {"us", "eu", "cn"}:
         raise ConfigError("COROS_REGION must be one of: us, eu, cn")
     token_cache = os.environ.get("COROS_TOKEN_CACHE") or None
-    distance_unit = os.environ.get("COROS_DISTANCE_UNIT", "km").strip().lower() or "km"
-    if distance_unit in {"mi", "mile", "miles", "imperial"}:
-        distance_unit = "mi"
-    elif distance_unit in {"km", "kilometer", "kilometers", "metric"}:
-        distance_unit = "km"
+    raw_unit = os.environ.get("COROS_DISTANCE_UNIT")
+    distance_unit: str | None
+    if raw_unit is None or not raw_unit.strip():
+        distance_unit = None
     else:
-        raise ConfigError("COROS_DISTANCE_UNIT must be km or mi")
+        normalized = raw_unit.strip().lower()
+        if normalized in {"mi", "mile", "miles", "imperial"}:
+            distance_unit = "mi"
+        elif normalized in {"km", "kilometer", "kilometers", "metric"}:
+            distance_unit = "km"
+        else:
+            raise ConfigError("COROS_DISTANCE_UNIT must be km or mi")
     return Config(
         email=email,
         password=password,

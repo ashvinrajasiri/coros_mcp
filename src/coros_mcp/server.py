@@ -132,9 +132,9 @@ def get_workout(workout_id: str) -> dict:
 def create_workout(name: str, sport: str, steps: list[dict]) -> dict:
     """Create a library workout from sport-agnostic steps. Agent owns coaching.
 
-    Pace targets: use MM:SS with unit min_per_km or min_per_mi, e.g.
-    {"kind": "pace", "low": "5:45", "unit": "min_per_km"} or low="9:30/mi".
-    Stored unit follows COROS_DISTANCE_UNIT (default km). Sync via COROS app.
+    Pace targets: use MM:SS with unit min_per_km or min_per_mi.
+    Stored unit auto-matches the athlete's COROS account setting (override with
+    COROS_DISTANCE_UNIT if needed). Sync via COROS app after scheduling.
     """
     try:
         workout = WorkoutCreate.model_validate(
@@ -142,12 +142,21 @@ def create_workout(name: str, sport: str, steps: list[dict]) -> dict:
         )
         normalized_sport = workout.sport.strip().lower()
         program_sport_type = program_sport_to_type(normalized_sport)
-        intermediate_steps = friendly_to_coros_steps(workout.steps)
+        client = _get_client()
+        pace_unit = client.distance_unit
+        intermediate_steps = friendly_to_coros_steps(
+            workout.steps, pace_store_as=pace_unit
+        )
         payload = build_program_payload(
             workout.name, program_sport_type, normalized_sport, intermediate_steps
         )
-        workout_id = _get_client().create_program(payload)
-        return {"id": workout_id, "name": workout.name, "sport": normalized_sport}
+        workout_id = client.create_program(payload)
+        return {
+            "id": workout_id,
+            "name": workout.name,
+            "sport": normalized_sport,
+            "distance_unit": pace_unit,
+        }
     except ValidationError as error:
         return error_payload(
             ToolError(
