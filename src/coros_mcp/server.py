@@ -130,7 +130,12 @@ def get_workout(workout_id: str) -> dict:
 
 @mcp.tool()
 def create_workout(name: str, sport: str, steps: list[dict]) -> dict:
-    """Create a library workout from sport-agnostic steps. Agent owns coaching. Sync to watch via COROS app after scheduling."""
+    """Create a library workout from sport-agnostic steps. Agent owns coaching.
+
+    Pace targets: use MM:SS with unit min_per_mi or min_per_km, e.g.
+    {"kind": "pace", "low": "9:30", "unit": "min_per_mi"} or low="9:30/mi".
+    Sync to watch via COROS app after scheduling.
+    """
     try:
         workout = WorkoutCreate.model_validate(
             {"name": name, "sport": sport, "steps": steps}

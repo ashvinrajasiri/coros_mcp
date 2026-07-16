@@ -5,6 +5,7 @@ from typing import Any
 
 from coros_mcp.errors import ToolError
 from coros_mcp.models import Duration, Target, WorkoutStep
+from coros_mcp.pace import parse_pace_target
 
 _SECONDS_PER_TIME_UNIT = {"sec": 1, "min": 60}
 _CENTIMETERS_PER_DISTANCE_UNIT = {"m": 100, "km": 100_000, "mi": 160_934.4}
@@ -26,8 +27,8 @@ def intermediate_to_program_exercises(
 ) -> list[dict[str, Any]]:
     """Convert stable intermediate steps into COROS library-program exercises.
 
-    Pace target values are seconds per kilometer multiplied by 1000, matching
-    the convention used by community COROS program clients.
+    Pace targets are milliseconds per kilometer in ``intensityValue`` /
+    ``intensityValueExtend`` with ``intensityDisplayUnit=2``.
     """
     if sport not in {"run", "bike", "strength"}:
         raise ToolError(
@@ -127,16 +128,7 @@ def _duration_to_coros(duration: Duration) -> int | float:
 
 def _target_to_coros(target: Target) -> dict[str, Any]:
     if target.kind == "pace":
-        if target.unit not in {None, "min_per_km"}:
-            raise ToolError(
-                f"Unsupported pace unit: {target.unit}",
-                code="UNSUPPORTED_SPORT_STEP",
-                hint="Use pace targets with unit 'min_per_km'.",
-            )
-        mapped = {"kind": "pace", "target_low": _pace_to_seconds_per_km(target.low)}
-        if target.high is not None:
-            mapped["target_high"] = _pace_to_seconds_per_km(target.high)
-        return mapped
+        return parse_pace_target(target.low, target.high, unit=target.unit)
 
     mapped = {"kind": target.kind, "target_low": target.low}
     if target.high is not None:
@@ -213,14 +205,16 @@ def _program_exercise(step: dict[str, Any], sort_no: int, sport: str) -> dict[st
             )
         low = target["target_low"]
         high = target.get("target_high", low)
-        multiplier = 1000 if target["kind"] == "pace" else 1
-        exercise.update(
-            {
-                "intensityType": intensity_type,
-                "intensityValue": _compact_number(low * multiplier),
-                "intensityValueExtend": _compact_number(high * multiplier),
-            }
-        )
+        updates: dict[str, Any] = {
+            "intensityType": intensity_type,
+            "intensityValue": _compact_number(low),
+            "intensityValueExtend": _compact_number(high),
+            "isIntensityPercent": False,
+            "hrType": 0,
+        }
+        if target["kind"] == "pace":
+            updates["intensityDisplayUnit"] = target.get("intensity_display_unit", 2)
+        exercise.update(updates)
     return exercise
 
 
@@ -269,34 +263,6 @@ def _estimated_totals(steps: Sequence[dict[str, Any]]) -> tuple[int | float, int
         else:
             seconds += duration
     return _compact_number(seconds), _compact_number(centimeters)
-
-
-def _pace_to_seconds_per_km(value: str | float | int) -> int:
-    if isinstance(value, (int, float)):
-        if value <= 0:
-            raise ToolError(
-                "Pace must be positive.",
-                code="VALIDATION_ERROR",
-                hint="Use a positive seconds-per-kilometer pace.",
-            )
-        return int(value)
-
-    minutes, separator, seconds = value.strip().partition(":")
-    try:
-        total_seconds = int(minutes) * 60 + int(seconds)
-    except ValueError as error:
-        raise ToolError(
-            f"Invalid pace: {value}",
-            code="VALIDATION_ERROR",
-            hint="Use MM:SS, for example '4:30'.",
-        ) from error
-    if not separator or total_seconds <= 0 or not 0 <= int(seconds) < 60:
-        raise ToolError(
-            f"Invalid pace: {value}",
-            code="VALIDATION_ERROR",
-            hint="Use MM:SS, for example '4:30'.",
-        )
-    return total_seconds
 
 
 def _coros_step_to_friendly(step: dict[str, Any]) -> WorkoutStep:

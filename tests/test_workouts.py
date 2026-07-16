@@ -72,7 +72,7 @@ def test_repeat_nest_preserves_count_and_mapped_child_steps():
     ]
 
 
-def test_pace_target_maps_to_seconds_per_kilometer():
+def test_pace_target_maps_to_ms_per_kilometer():
     workout = WorkoutCreate.model_validate(
         {
             "name": "Tempo",
@@ -90,7 +90,36 @@ def test_pace_target_maps_to_seconds_per_kilometer():
     steps = friendly_to_coros_steps(workout.steps)
 
     assert steps[0]["duration"] == 100000
-    assert steps[0]["target"] == {"kind": "pace", "target_low": 270}
+    assert steps[0]["target"] == {
+        "kind": "pace",
+        "target_low": 270_000,
+        "target_high": 270_000,
+        "intensity_display_unit": 2,
+    }
+
+
+def test_easy_run_pace_min_per_mi_program_exercise():
+    workout = WorkoutCreate.model_validate(
+        {
+            "name": "Easy",
+            "sport": "run",
+            "steps": [
+                {
+                    "type": "steady",
+                    "duration": {"unit": "time", "value": 30, "time_unit": "min"},
+                    "target": {"kind": "pace", "low": "9:30", "unit": "min_per_mi"},
+                }
+            ],
+        }
+    )
+    exercises = intermediate_to_program_exercises(
+        friendly_to_coros_steps(workout.steps), sport="run"
+    )
+    exercise = exercises[0]
+    assert exercise["intensityType"] == 3
+    assert exercise["intensityDisplayUnit"] == 2
+    assert 353_000 <= exercise["intensityValue"] <= 355_000
+    assert exercise["intensityValue"] == exercise["intensityValueExtend"]
 
 
 def test_intermediate_steps_become_timed_program_exercises():
