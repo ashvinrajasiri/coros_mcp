@@ -54,11 +54,14 @@ def normalize_daily_metrics(raw_day: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def normalize_scheduled_entry(raw: dict[str, Any]) -> dict[str, Any]:
-    """Normalize common schedule fields when supplied by a COROS response."""
+def normalize_scheduled_entry(
+    raw: dict[str, Any], program: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Normalize a schedule entity; ``schedule_id`` is the entity id, not a library workout id."""
+    program = program or {}
     mappings = {
         "schedule_id": ("scheduleId", "id"),
-        "date": ("date", "scheduleDate"),
+        "date": ("happenDay", "date", "scheduleDate"),
         "workout_id": ("workoutId", "programId", "trainingId"),
         "name": ("name", "title"),
     }
@@ -67,7 +70,19 @@ def normalize_scheduled_entry(raw: dict[str, Any]) -> dict[str, Any]:
         for friendly, keys in mappings.items()
         if (value := _first(raw, *keys)) is not None
     }
-    sport_type = raw.get("sportType")
+    if "date" in normalized:
+        normalized["date"] = str(normalized["date"])
+    if "workout_id" not in normalized and (value := program.get("id")) is not None:
+        normalized["workout_id"] = value
+    if "name" not in normalized and (value := _first(program, "name", "title")) is not None:
+        normalized["name"] = value
+
+    sport_data = program.get("sportData")
+    sport_type = (
+        sport_data.get("sportType")
+        if isinstance(sport_data, dict)
+        else program.get("sportType", raw.get("sportType"))
+    )
     if isinstance(sport_type, int):
         try:
             normalized["sport"] = type_to_sport(sport_type)

@@ -103,7 +103,7 @@ class CorosClient:
             self._request(
                 "GET",
                 "/training/schedule/query",
-                params=_date_params(start, end),
+                params={**_date_params(start, end), "supportRestExercise": 1},
             )
         )
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date as calendar_date, timedelta
 from typing import Any
 
 from dotenv import load_dotenv
@@ -10,7 +11,12 @@ from coros_mcp.client import CorosClient
 from coros_mcp.config import ConfigError
 from coros_mcp.errors import ToolError, error_payload
 from coros_mcp.models import WorkoutCreate
-from coros_mcp.normalize import normalize_activity_list_item, normalize_daily_metrics
+from coros_mcp.normalize import (
+    normalize_activity_list_item,
+    normalize_daily_metrics,
+    normalize_scheduled_entry,
+    to_yyyymmdd,
+)
 from coros_mcp.sports import program_sport_to_type
 from coros_mcp.workouts import build_program_payload, friendly_to_coros_steps
 
@@ -159,6 +165,118 @@ def delete_workout(workout_id: str) -> dict:
         return error_payload(error)
     except ConfigError as error:
         return _auth_error_payload(error)
+
+
+@mcp.tool()
+def list_scheduled_workouts(start_date: str, end_date: str) -> dict:
+    """List calendar entries YYYY-MM-DD..YYYY-MM-DD; schedule_id is an entry id, not a library workout id."""
+    try:
+        plan = _get_client().query_schedule(start_date, end_date)
+        programs = _schedule_programs_by_id(plan.get("programs"))
+        entities = plan.get("entities")
+        return {
+            "scheduled": [
+                normalize_scheduled_entry(
+                    entity, programs.get(str(entity.get("idInPlan")))
+                )
+                for entity in entities
+                if isinstance(entity, dict)
+            ]
+            if isinstance(entities, list)
+            else []
+        }
+    except ToolError as error:
+        return error_payload(error)
+    except ConfigError as error:
+        return _auth_error_payload(error)
+
+
+@mcp.tool()
+def schedule_workout(workout_id: str, date: str) -> dict:
+    """Schedule a library workout on YYYY-MM-DD (including far-future dates); it appears after COROS app syncs to watch."""
+    try:
+        client = _get_client()
+        plan = client.query_schedule(date, date)
+        program = client.get_program(workout_id)
+        id_in_plan = str(int(plan.get("maxPlanProgramId") or 0) + 1)
+        payload = {
+            "entities": [
+                {
+                    "happenDay": to_yyyymmdd(date),
+                    "idInPlan": id_in_plan,
+                    "sortNo": 0,
+                    "dayNo": 0,
+                    "sortNoInPlan": 0,
+                    "sortNoInSchedule": 0,
+                    "exerciseBarChart": program.get("exerciseBarChart") or [],
+                }
+            ],
+            "programs": [{**program, "idInPlan": id_in_plan}],
+            "versionObjects": [{"id": id_in_plan, "status": 1}],
+            "pbVersion": 2,
+        }
+        client.update_schedule(payload)
+        return {"workout_id": workout_id, "date": date, "id_in_plan": id_in_plan}
+    except ToolError as error:
+        return error_payload(error)
+    except ConfigError as error:
+        return _auth_error_payload(error)
+
+
+@mcp.tool()
+def unschedule_workout(schedule_id: str) -> dict:
+    """Remove one calendar entry by the schedule_id returned from list_scheduled_workouts."""
+    try:
+        client = _get_client()
+        today = calendar_date.today()
+        plan = client.query_schedule(
+            (today - timedelta(days=30)).isoformat(),
+            (today + timedelta(days=400)).isoformat(),
+        )
+        entities = plan.get("entities")
+        entity = next(
+            (
+                candidate
+                for candidate in entities
+                if isinstance(candidate, dict)
+                and str(candidate.get("id")) == str(schedule_id)
+            ),
+            None,
+        ) if isinstance(entities, list) else None
+        if entity is None:
+            raise ToolError(
+                f"Scheduled workout {schedule_id!r} was not found in the searchable calendar window.",
+                code="NOT_FOUND",
+                hint="List scheduled workouts to obtain a current schedule_id.",
+            )
+        client.update_schedule(
+            {
+                "versionObjects": [
+                    {
+                        "id": str(entity["idInPlan"]),
+                        "planProgramId": str(entity["planProgramId"]),
+                        "planId": plan["id"],
+                        "status": 3,
+                    }
+                ],
+                "pbVersion": 2,
+            }
+        )
+        return {"schedule_id": schedule_id}
+    except ToolError as error:
+        return error_payload(error)
+    except ConfigError as error:
+        return _auth_error_payload(error)
+
+
+def _schedule_programs_by_id(value: Any) -> dict[str, dict[str, Any]]:
+    if not isinstance(value, list):
+        return {}
+    return {
+        str(program["idInPlan"]): program
+        for program in value
+        if isinstance(program, dict) and program.get("idInPlan") is not None
+    }
 
 
 def _auth_error_payload(error: ConfigError) -> dict:

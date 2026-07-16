@@ -117,3 +117,29 @@ def test_program_client_uses_verified_library_endpoints():
     assert library_requests[2].url.path == "/training/program/add"
     assert library_requests[3].url.path == "/training/program/delete"
     assert library_requests[3].content == b'["123456789012345678"]'
+
+
+def test_schedule_query_includes_rest_exercises():
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/account/login":
+            return httpx.Response(
+                200, json={"result": "0000", "data": {"accessToken": "token"}}
+            )
+        return httpx.Response(200, json={"result": "0000", "data": {}})
+
+    client = CorosClient(Config(email="athlete@example.com", password="password"))
+    client._client = httpx.Client(transport=httpx.MockTransport(handler))
+    try:
+        assert client.query_schedule("2026-07-01", "2026-08-31") == {}
+    finally:
+        client.close()
+
+    assert requests[1].url.path == "/training/schedule/query"
+    assert dict(requests[1].url.params) == {
+        "startDate": "20260701",
+        "endDate": "20260831",
+        "supportRestExercise": "1",
+    }
