@@ -8,7 +8,7 @@ class FakeClient:
     def get_day_detail(self, start: str, end: str) -> dict:
         assert (start, end) == ("2024-03-09", "2024-03-10")
         return {
-            "dataList": [
+            "dayList": [
                 {"date": "20240309", "restingHr": 48, "trainingLoad": 75},
                 {"date": "20240310", "sleepTime": 28800},
             ]
@@ -44,7 +44,7 @@ def test_get_daily_metrics_normalizes_requested_range(monkeypatch):
 
     assert server.get_daily_metrics("2024-03-09", "2024-03-10") == {
         "days": [
-            {"date": "20240309", "resting_hr": 48, "training_load": 75},
+            {"date": "20240309", "rhr": 48, "training_load": 75},
             {"date": "20240310", "sleep_sec": 28800},
         ]
     }

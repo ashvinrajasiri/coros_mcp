@@ -69,10 +69,11 @@ def test_login_saves_token_cache_and_uses_hashed_password(tmp_path):
         "pwd": hash_password("password"),
     }
     assert b"password" not in captured_request.content
-    assert session.headers() == {
-        "accesstoken": "cached-token",
-        "content-type": "application/json",
-    }
+    headers = session.headers()
+    assert headers["accesstoken"] == "cached-token"
+    assert headers["accessToken"] == "cached-token"
+    assert headers["content-type"] == "application/json"
+    assert json.loads(headers["yfheader"]) == {"userId": "user-123"}
     assert json.loads(cache_path.read_text()) == {
         "access_token": "cached-token",
         "user_id": "user-123",

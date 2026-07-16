@@ -40,9 +40,12 @@ def _reset_client() -> None:
     _client = None
 
 
-def _data_list(response: dict[str, Any]) -> list[dict[str, Any]]:
-    values = response.get("dataList", [])
-    return [value for value in values if isinstance(value, dict)] if isinstance(values, list) else []
+def _data_list(response: dict[str, Any], *keys: str) -> list[dict[str, Any]]:
+    for key in keys or ("dataList",):
+        values = response.get(key, [])
+        if isinstance(values, list):
+            return [value for value in values if isinstance(value, dict)]
+    return []
 
 
 @mcp.tool()
@@ -50,7 +53,12 @@ def get_daily_metrics(start_date: str, end_date: str | None = None) -> dict:
     """Read daily COROS metrics (HRV, RHR, load, fatigue, sleep-as-available) for a date or range (YYYY-MM-DD). Coaching logic stays in the agent. Watch sync is via COROS app after calendar writes."""
     try:
         response = _get_client().get_day_detail(start_date, end_date or start_date)
-        return {"days": [normalize_daily_metrics(day) for day in _data_list(response)]}
+        return {
+            "days": [
+                normalize_daily_metrics(day)
+                for day in _data_list(response, "dayList", "dataList", "list")
+            ]
+        }
     except ToolError as error:
         return error_payload(error)
     except ConfigError as error:
@@ -64,7 +72,8 @@ def list_activities(start_date: str, end_date: str) -> dict:
         response = _get_client().query_activities(start_date, end_date)
         return {
             "activities": [
-                normalize_activity_list_item(activity) for activity in _data_list(response)
+                normalize_activity_list_item(activity)
+                for activity in _data_list(response, "dataList", "list")
             ]
         }
     except ToolError as error:
@@ -222,36 +231,51 @@ def unschedule_workout(schedule_id: str) -> dict:
     try:
         client = _get_client()
         today = calendar_date.today()
-        plan = client.query_schedule(
-            (today - timedelta(days=30)).isoformat(),
-            (today + timedelta(days=400)).isoformat(),
-        )
-        entities = plan.get("entities")
-        entity = next(
-            (
-                candidate
-                for candidate in entities
-                if isinstance(candidate, dict)
-                and str(candidate.get("id")) == str(schedule_id)
-            ),
-            None,
-        ) if isinstance(entities, list) else None
-        if entity is None:
+        entity = None
+        plan: dict[str, Any] | None = None
+        # Query in ~60-day chunks — a single huge range can timeout on COROS.
+        window_start = today - timedelta(days=30)
+        window_end = today + timedelta(days=400)
+        cursor = window_start
+        while cursor <= window_end:
+            chunk_end = min(cursor + timedelta(days=60), window_end)
+            candidate_plan = client.query_schedule(
+                cursor.isoformat(), chunk_end.isoformat()
+            )
+            entities = candidate_plan.get("entities")
+            if isinstance(entities, list):
+                match = next(
+                    (
+                        item
+                        for item in entities
+                        if isinstance(item, dict)
+                        and str(item.get("id")) == str(schedule_id)
+                    ),
+                    None,
+                )
+                if match is not None:
+                    entity = match
+                    plan = candidate_plan
+                    break
+            cursor = chunk_end + timedelta(days=1)
+
+        if entity is None or plan is None:
             raise ToolError(
                 f"Scheduled workout {schedule_id!r} was not found in the searchable calendar window.",
                 code="NOT_FOUND",
                 hint="List scheduled workouts to obtain a current schedule_id.",
             )
+        version_object: dict[str, Any] = {
+            "id": str(entity["idInPlan"]),
+            "status": 3,
+        }
+        if entity.get("planProgramId") is not None:
+            version_object["planProgramId"] = str(entity["planProgramId"])
+        if plan.get("id") is not None:
+            version_object["planId"] = plan["id"]
         client.update_schedule(
             {
-                "versionObjects": [
-                    {
-                        "id": str(entity["idInPlan"]),
-                        "planProgramId": str(entity["planProgramId"]),
-                        "planId": plan["id"],
-                        "status": 3,
-                    }
-                ],
+                "versionObjects": [version_object],
                 "pbVersion": 2,
             }
         )

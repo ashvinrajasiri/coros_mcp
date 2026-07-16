@@ -20,7 +20,7 @@ class CorosClient:
     def __init__(self, config: Config | None = None):
         self._config = config or load_config()
         self._auth = AuthSession(self._config)
-        self._client = httpx.Client()
+        self._client = httpx.Client(timeout=60.0)
         self._base_url = base_url_for_region(self._config.region)
 
     def ensure_auth(self) -> None:
@@ -39,7 +39,7 @@ class CorosClient:
             self._request(
                 "GET",
                 "/analyse/dayDetail/query",
-                params=_date_params(start, end),
+                params=_day_params(start, end),
             )
         )
 
@@ -50,7 +50,11 @@ class CorosClient:
             self._request(
                 "GET",
                 "/activity/query",
-                params={**_date_params(start, end), "page": page, "size": size},
+                params={
+                    **_day_params(start, end),
+                    "pageNumber": page,
+                    "size": size,
+                },
             )
         )
 
@@ -109,6 +113,7 @@ class CorosClient:
         )
 
     def query_schedule(self, start: str, end: str) -> dict:
+        # Schedule uses startDate/endDate; analyse/activity use startDay/endDay.
         return self._as_dict(
             self._request(
                 "GET",
@@ -164,6 +169,10 @@ class CorosClient:
 
 def _date_params(start: str, end: str) -> dict[str, str]:
     return {"startDate": to_yyyymmdd(start), "endDate": to_yyyymmdd(end)}
+
+
+def _day_params(start: str, end: str) -> dict[str, str]:
+    return {"startDay": to_yyyymmdd(start), "endDay": to_yyyymmdd(end)}
 
 
 def _is_auth_response(response: httpx.Response) -> bool:

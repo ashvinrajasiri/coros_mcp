@@ -46,19 +46,27 @@ def normalize_activity_list_item(raw: dict[str, Any]) -> dict[str, Any]:
 def normalize_daily_metrics(raw_day: dict[str, Any]) -> dict[str, Any]:
     """Return available daily-metric fields without requiring a fixed payload."""
     mappings = {
-        "date": ("date", "day"),
+        "date": ("date", "happenDay", "day"),
         "steps": ("steps", "step"),
         "calories": ("calories", "calorie"),
-        "resting_hr": ("restingHr", "restHr"),
-        "sleep_sec": ("sleepTime", "sleepDuration"),
+        "rhr": ("rhr", "restingHr", "restHr", "testRhr"),
+        "hrv": ("avgSleepHrv", "hrv"),
+        "hrv_baseline": ("sleepHrvBase",),
+        "fatigue": ("tiredRateNew", "tiredRate"),
         "training_load": ("trainingLoad",),
-        "active_time_sec": ("activeTime", "activeDuration"),
+        "training_load_ratio": ("trainingLoadRatio",),
+        "sleep_sec": ("sleepTime", "sleepDuration"),
+        "active_time_sec": ("activeTime", "activeDuration", "duration"),
+        "distance_m": ("distance",),
     }
-    return {
+    normalized = {
         friendly: value
         for friendly, keys in mappings.items()
         if (value := _first(raw_day, *keys)) is not None
     }
+    if "date" in normalized:
+        normalized["date"] = str(normalized["date"])
+    return normalized
 
 
 def normalize_scheduled_entry(

@@ -51,8 +51,8 @@ def test_get_day_detail_converts_dates_and_returns_data():
 
     assert requests[1].url.path == "/analyse/dayDetail/query"
     assert dict(requests[1].url.params) == {
-        "startDate": "20240309",
-        "endDate": "20240310",
+        "startDay": "20240309",
+        "endDay": "20240310",
     }
 
 

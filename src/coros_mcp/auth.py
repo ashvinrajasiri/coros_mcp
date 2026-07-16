@@ -49,10 +49,16 @@ class AuthSession:
                 code="UNAUTHORIZED",
                 hint="Call login() before making authenticated requests.",
             )
-        return {
+        headers = {
             "accesstoken": self._access_token,
+            "accessToken": self._access_token,
             "content-type": "application/json",
+            "accept": "application/json, text/plain, */*",
         }
+        # Training Hub analyse/activity endpoints require yfheader with userId.
+        if self.user_id:
+            headers["yfheader"] = json.dumps({"userId": self.user_id})
+        return headers
 
     def login(self, client: httpx.Client) -> None:
         try:
