@@ -15,6 +15,8 @@ from coros_mcp.normalize import (
     normalize_activity_list_item,
     normalize_daily_metrics,
     normalize_scheduled_entry,
+    normalize_workout_detail,
+    normalize_workout_summary,
     to_yyyymmdd,
 )
 from coros_mcp.sports import program_sport_to_type
@@ -54,7 +56,7 @@ def _data_list(response: dict[str, Any], *keys: str) -> list[dict[str, Any]]:
 
 @mcp.tool()
 def get_daily_metrics(start_date: str, end_date: str | None = None) -> dict:
-    """Read daily COROS metrics (HRV, RHR, load, fatigue, sleep-as-available) for a date or range (YYYY-MM-DD). Coaching logic stays in the agent. Watch sync is via COROS app after calendar writes."""
+    """Daily metrics (HRV, RHR, load, sleep) for YYYY-MM-DD or a short range."""
     try:
         response = _get_client().get_day_detail(start_date, end_date or start_date)
         return {
@@ -71,7 +73,7 @@ def get_daily_metrics(start_date: str, end_date: str | None = None) -> dict:
 
 @mcp.tool()
 def list_activities(start_date: str, end_date: str) -> dict:
-    """List completed COROS activities in a date range (YYYY-MM-DD)."""
+    """List completed activities in a YYYY-MM-DD range (prefer ≤31 days)."""
     try:
         response = _get_client().query_activities(start_date, end_date)
         return {
@@ -101,7 +103,7 @@ def get_activity(activity_id: str) -> dict:
 def list_workouts(
     sport: str | None = None, name_contains: str | None = None
 ) -> dict:
-    """List library workouts, optionally filtered by program sport and name."""
+    """List library workouts as compact {id,name,sport}. Filter by sport/name."""
     try:
         sport_type = program_sport_to_type(sport) if sport is not None else None
         workouts = _get_client().list_programs(sport_type=sport_type)
@@ -113,7 +115,7 @@ def list_workouts(
                 if name_filter in str(workout.get("name", "")).lower()
             ]
         return {
-            "workouts": workouts
+            "workouts": [normalize_workout_summary(workout) for workout in workouts]
         }
     except ToolError as error:
         return error_payload(error)
@@ -122,10 +124,13 @@ def list_workouts(
 
 
 @mcp.tool()
-def get_workout(workout_id: str) -> dict:
-    """Get one library workout by id."""
+def get_workout(workout_id: str, raw: bool = False) -> dict:
+    """Get one library workout. Compact steps by default; raw=true for full COROS JSON."""
     try:
-        return _get_client().get_program(workout_id)
+        program = _get_client().get_program(workout_id)
+        if raw:
+            return program
+        return normalize_workout_detail(program)
     except ToolError as error:
         return error_payload(error)
     except ConfigError as error:
@@ -134,12 +139,7 @@ def get_workout(workout_id: str) -> dict:
 
 @mcp.tool()
 def create_workout(name: str, sport: str, steps: list[dict]) -> dict:
-    """Create a library workout from sport-agnostic steps. Agent owns coaching.
-
-    Pace targets: use MM:SS with unit min_per_km or min_per_mi.
-    Stored unit auto-matches the athlete's COROS account setting (override with
-    COROS_DISTANCE_UNIT if needed). Sync via COROS app after scheduling.
-    """
+    """Create a run/bike library workout. Pace: MM:SS with min_per_km or min_per_mi."""
     try:
         workout = WorkoutCreate.model_validate(
             {"name": name, "sport": sport, "steps": steps}
@@ -180,11 +180,17 @@ def create_workout(name: str, sport: str, steps: list[dict]) -> dict:
 
 
 @mcp.tool()
-def search_strength_exercises(query: str, limit: int = 20) -> dict:
-    """Search the COROS strength exercise catalog by name (e.g. 'push', 'squat')."""
+def search_strength_exercises(
+    query: str, limit: int = 10, verbose: bool = False
+) -> dict:
+    """Search strength catalog. Returns {id,name}; verbose=true adds metadata."""
     try:
         catalog = _get_client().list_exercises(sport_type=4)
-        return {"exercises": search_catalog(catalog, query, limit=limit)}
+        return {
+            "exercises": search_catalog(
+                catalog, query, limit=limit, verbose=verbose
+            )
+        }
     except ToolError as error:
         return error_payload(error)
     except ConfigError as error:
@@ -195,13 +201,7 @@ def search_strength_exercises(query: str, limit: int = 20) -> dict:
 def create_strength_workout(
     name: str, exercises: list[dict], sets: int = 1
 ) -> dict:
-    """Create a strength library workout from catalog exercises.
-
-    Each exercise: ``{name, reps}`` or ``{name, duration_sec}``, optional
-    ``rest_sec`` (default 60). ``name`` is a human catalog name from
-    ``search_strength_exercises`` (or ``origin_id``). ``sets`` repeats the
-    whole circuit. Schedule afterward with ``schedule_workout``.
-    """
+    """Create strength workout. Exercise: {name,reps|duration_sec}, optional rest_sec/sets. Workout sets=default per exercise."""
     try:
         client = _get_client()
         catalog = client.list_exercises(sport_type=4)
@@ -224,7 +224,7 @@ def create_strength_workout(
 
 @mcp.tool()
 def delete_workout(workout_id: str) -> dict:
-    """Delete one library workout by id."""
+    """Delete one library workout by id. Prefer delete_workouts for multiples."""
     try:
         _get_client().delete_program(workout_id)
         return {"id": workout_id}
@@ -235,8 +235,27 @@ def delete_workout(workout_id: str) -> dict:
 
 
 @mcp.tool()
+def delete_workouts(workout_ids: list[str]) -> dict:
+    """Delete many library workouts in one call (pass id list from list_workouts)."""
+    try:
+        ids = [str(workout_id) for workout_id in workout_ids if workout_id]
+        if not ids:
+            raise ToolError(
+                "workout_ids must not be empty.",
+                code="VALIDATION_ERROR",
+                hint="Pass ids from list_workouts.",
+            )
+        _get_client().delete_programs(ids)
+        return {"deleted": ids, "count": len(ids)}
+    except ToolError as error:
+        return error_payload(error)
+    except ConfigError as error:
+        return _config_error_payload(error)
+
+
+@mcp.tool()
 def list_scheduled_workouts(start_date: str, end_date: str) -> dict:
-    """List calendar entries YYYY-MM-DD..YYYY-MM-DD; schedule_id is an entry id, not a library workout id."""
+    """List calendar entries for YYYY-MM-DD..YYYY-MM-DD (prefer ≤14 days)."""
     try:
         plan = _get_client().query_schedule(start_date, end_date)
         programs = _schedule_programs_by_id(plan.get("programs"))
@@ -260,7 +279,7 @@ def list_scheduled_workouts(start_date: str, end_date: str) -> dict:
 
 @mcp.tool()
 def schedule_workout(workout_id: str, date: str) -> dict:
-    """Schedule a library workout on YYYY-MM-DD (including far-future dates); it appears after COROS app syncs to watch."""
+    """Schedule a library workout on YYYY-MM-DD (sync COROS app to watch after)."""
     try:
         client = _get_client()
         plan = client.query_schedule(date, date)
@@ -291,21 +310,28 @@ def schedule_workout(workout_id: str, date: str) -> dict:
 
 
 @mcp.tool()
-def unschedule_workout(schedule_id: str) -> dict:
-    """Remove one calendar entry by the schedule_id returned from list_scheduled_workouts."""
+def unschedule_workout(
+    schedule_id: str, around_date: str | None = None
+) -> dict:
+    """Remove a calendar entry by schedule_id. Pass around_date (YYYY-MM-DD) to search faster."""
     try:
         client = _get_client()
-        today = calendar_date.today()
         entity = None
         plan: dict[str, Any] | None = None
-        # Query in ~60-day chunks — a single huge range can timeout on COROS.
-        window_start = today - timedelta(days=30)
-        window_end = today + timedelta(days=400)
-        cursor = window_start
-        while cursor <= window_end:
-            chunk_end = min(cursor + timedelta(days=60), window_end)
+
+        if around_date is not None:
+            try:
+                center = calendar_date.fromisoformat(around_date)
+            except ValueError as error:
+                raise ToolError(
+                    f"Invalid around_date: {around_date!r}",
+                    code="VALIDATION_ERROR",
+                    hint="Use YYYY-MM-DD",
+                ) from error
+            window_start = center - timedelta(days=7)
+            window_end = center + timedelta(days=7)
             candidate_plan = client.query_schedule(
-                cursor.isoformat(), chunk_end.isoformat()
+                window_start.isoformat(), window_end.isoformat()
             )
             entities = candidate_plan.get("entities")
             if isinstance(entities, list):
@@ -321,14 +347,40 @@ def unschedule_workout(schedule_id: str) -> dict:
                 if match is not None:
                     entity = match
                     plan = candidate_plan
-                    break
-            cursor = chunk_end + timedelta(days=1)
+
+        if entity is None:
+            # Query in ~60-day chunks — a single huge range can timeout on COROS.
+            today = calendar_date.today()
+            window_start = today - timedelta(days=30)
+            window_end = today + timedelta(days=400)
+            cursor = window_start
+            while cursor <= window_end:
+                chunk_end = min(cursor + timedelta(days=60), window_end)
+                candidate_plan = client.query_schedule(
+                    cursor.isoformat(), chunk_end.isoformat()
+                )
+                entities = candidate_plan.get("entities")
+                if isinstance(entities, list):
+                    match = next(
+                        (
+                            item
+                            for item in entities
+                            if isinstance(item, dict)
+                            and str(item.get("id")) == str(schedule_id)
+                        ),
+                        None,
+                    )
+                    if match is not None:
+                        entity = match
+                        plan = candidate_plan
+                        break
+                cursor = chunk_end + timedelta(days=1)
 
         if entity is None or plan is None:
             raise ToolError(
                 f"Scheduled workout {schedule_id!r} was not found in the searchable calendar window.",
                 code="NOT_FOUND",
-                hint="List scheduled workouts to obtain a current schedule_id.",
+                hint="Pass around_date near the entry, or list_scheduled_workouts first.",
             )
         version_object: dict[str, Any] = {
             "id": str(entity["idInPlan"]),

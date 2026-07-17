@@ -5,6 +5,8 @@ from coros_mcp.normalize import (
     normalize_activity_list_item,
     normalize_daily_metrics,
     normalize_scheduled_entry,
+    normalize_workout_detail,
+    normalize_workout_summary,
     to_yyyymmdd,
 )
 
@@ -74,3 +76,35 @@ def test_normalize_scheduled_entry_maps_common_fields():
         "name": "Intervals",
         "sport": "run",
     }
+
+
+def test_normalize_workout_summary_and_detail_are_compact():
+    raw = {
+        "id": "workout-1",
+        "name": "Easy Run",
+        "sportType": 1,
+        "exerciseBarChart": [{"huge": True}],
+        "sourceUrl": "https://example.com/x.png",
+        "exercises": [
+            {
+                "name": "Warm",
+                "targetType": 2,
+                "targetValue": 600,
+                "intensityPercent": 99999,
+                "sourceUrl": "https://example.com/y.png",
+            }
+        ],
+    }
+    assert normalize_workout_summary(raw) == {
+        "id": "workout-1",
+        "name": "Easy Run",
+        "sport": "run",
+        "step_count": 1,
+    }
+    detail = normalize_workout_detail(raw)
+    assert detail["steps"] == [
+        {"name": "Warm", "targetType": 2, "targetValue": 600}
+    ]
+    assert "exerciseBarChart" not in detail
+    assert "sourceUrl" not in detail
+    assert "intensityPercent" not in detail["steps"][0]

@@ -4,7 +4,26 @@ from datetime import date
 from typing import Any
 
 from coros_mcp.errors import ToolError
-from coros_mcp.sports import type_to_sport
+from coros_mcp.sports import PROGRAM_SPORT_TYPES, type_to_sport
+
+_PROGRAM_TYPE_TO_SPORT = {value: key for key, value in PROGRAM_SPORT_TYPES.items()}
+
+# Fields kept on each exercise when returning a compact workout detail.
+_SLIM_EXERCISE_KEYS = (
+    "name",
+    "overview",
+    "sortNo",
+    "targetType",
+    "targetValue",
+    "intensityType",
+    "intensityValue",
+    "intensityValueExtend",
+    "intensityDisplayUnit",
+    "restValue",
+    "repeatTimes",
+    "originId",
+    "sets",
+)
 
 
 def to_yyyymmdd(value: str) -> str:
@@ -92,18 +111,64 @@ def normalize_scheduled_entry(
     if "name" not in normalized and (value := _first(program, "name", "title")) is not None:
         normalized["name"] = value
 
-    sport_data = program.get("sportData")
-    sport_type = (
-        sport_data.get("sportType")
-        if isinstance(sport_data, dict)
-        else program.get("sportType", raw.get("sportType"))
-    )
-    if isinstance(sport_type, int):
-        try:
-            normalized["sport"] = type_to_sport(sport_type)
-        except ToolError:
-            pass
+    sport = _program_sport(program) or _program_sport(raw)
+    if sport is not None:
+        normalized["sport"] = sport
     return normalized
+
+
+def normalize_workout_summary(raw: dict[str, Any]) -> dict[str, Any]:
+    """Compact library-workout row for list responses (token-cheap)."""
+    exercises = raw.get("exercises")
+    step_count = len(exercises) if isinstance(exercises, list) else None
+    summary: dict[str, Any] = {
+        "id": str(_first(raw, "id", "programId") or ""),
+        "name": _first(raw, "name", "title"),
+        "sport": _program_sport(raw),
+    }
+    if step_count is not None:
+        summary["step_count"] = step_count
+    return summary
+
+
+def normalize_workout_detail(raw: dict[str, Any]) -> dict[str, Any]:
+    """Compact workout detail: summary + slim steps (no charts/URLs)."""
+    detail = normalize_workout_summary(raw)
+    exercises = raw.get("exercises")
+    if isinstance(exercises, list):
+        detail["steps"] = [
+            _slim_exercise(item) for item in exercises if isinstance(item, dict)
+        ]
+        detail["step_count"] = len(detail["steps"])
+    return detail
+
+
+def _program_sport(raw: dict[str, Any]) -> str | None:
+    sport_data = raw.get("sportData")
+    sport_type: Any
+    if isinstance(sport_data, dict):
+        sport_type = sport_data.get("sportType", raw.get("sportType"))
+    else:
+        sport_type = raw.get("sportType")
+    if not isinstance(sport_type, int):
+        return None
+    try:
+        return type_to_sport(sport_type)
+    except ToolError:
+        return _PROGRAM_TYPE_TO_SPORT.get(sport_type)
+
+
+def _slim_exercise(raw: dict[str, Any]) -> dict[str, Any]:
+    slim = {
+        key: raw[key] for key in _SLIM_EXERCISE_KEYS if raw.get(key) is not None
+    }
+    # Strength sets sometimes nest under sets/exercises — keep one level only.
+    nested = raw.get("sets") or raw.get("exercises")
+    if isinstance(nested, list) and nested:
+        slim["sets"] = [
+            _slim_exercise(item) for item in nested if isinstance(item, dict)
+        ]
+    return slim
 
 
 def _first(raw: dict[str, Any], *keys: str) -> Any:

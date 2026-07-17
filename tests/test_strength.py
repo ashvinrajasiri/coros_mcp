@@ -45,9 +45,14 @@ def test_humanize_overview():
 
 def test_search_catalog_matches_human_name():
     results = search_catalog(_catalog(), "push")
+    assert results == [{"id": "1", "name": "Push Ups"}]
+
+
+def test_search_catalog_verbose_includes_metadata():
+    results = search_catalog(_catalog(), "push", verbose=True)
     assert len(results) == 1
-    assert results[0]["name"] == "Push Ups"
-    assert results[0]["id"] == "1"
+    assert results[0]["overview"] == "sid_strength_push_ups"
+    assert results[0]["muscle_ids"] == [2]
 
 
 def test_resolve_exercise_exact_name():
@@ -83,14 +88,32 @@ def test_build_strength_program_payload():
     )
     assert payload["sportType"] == 4
     assert payload["sets"] == 3
+    assert payload["totalSets"] == 6
     assert payload["name"] == "Quick Push"
     assert len(payload["exercises"]) == 2
     assert payload["exercises"][0]["originId"] == "1"
     assert payload["exercises"][0]["targetType"] == 3
     assert payload["exercises"][0]["targetValue"] == 15
     assert payload["exercises"][0]["restValue"] == 45
+    assert payload["exercises"][0]["sets"] == 3
     assert payload["exercises"][1]["targetType"] == 2
     assert payload["exercises"][1]["targetValue"] == 40
+    assert payload["exercises"][1]["sets"] == 3
+
+
+def test_build_allows_per_exercise_sets_override():
+    payload = build_strength_program_payload(
+        "Mixed Sets",
+        [
+            {"name": "Push Ups", "reps": 10, "sets": 2},
+            {"name": "Squats", "reps": 8, "sets": 5},
+        ],
+        catalog=_catalog(),
+        sets=3,
+    )
+    assert payload["exercises"][0]["sets"] == 2
+    assert payload["exercises"][1]["sets"] == 5
+    assert payload["totalSets"] == 7
 
 
 def test_build_requires_reps_or_duration():

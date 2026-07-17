@@ -45,8 +45,13 @@ def search_catalog(
     query: str,
     *,
     limit: int = 20,
+    verbose: bool = False,
 ) -> list[dict[str, Any]]:
-    """Case-insensitive substring search over human name, overview, and T-code."""
+    """Case-insensitive substring search over human name, overview, and T-code.
+
+    By default returns ``{id, name}`` only (token-cheap). Pass ``verbose=True``
+    for muscle/equipment/overview metadata.
+    """
     needle = query.strip().lower()
     if not needle:
         raise ToolError(
@@ -86,14 +91,17 @@ def search_catalog(
 
     # Prefer tighter matches, then shorter names ("Planks" before "Plank Jacks").
     scored.sort(key=lambda pair: (pair[0], len(pair[1]["name"]), pair[1]["name"]))
-    return [item for _, item in scored[:limit]]
+    results = [item for _, item in scored[:limit]]
+    if verbose:
+        return results
+    return [{"id": item["id"], "name": item["name"]} for item in results]
 
 
 def resolve_exercise(
     exercises: list[dict[str, Any]], query: str
 ) -> dict[str, Any]:
     """Resolve one catalog exercise by human name / overview / T-code."""
-    matches = search_catalog(exercises, query, limit=10)
+    matches = search_catalog(exercises, query, limit=10, verbose=True)
     if not matches:
         raise ToolError(
             f"No strength exercise matched {query!r}.",
@@ -159,9 +167,18 @@ def build_strength_program_payload(
     total_duration = 0
     for index, step in enumerate(exercises):
         resolved, target_type, target_value, rest = _normalize_step(step, catalog)
+        # Per-exercise sets override the workout-level default. COROS persists
+        # sets on each exercise (program-level ``sets`` is ignored on readback).
+        step_sets = step.get("sets", sets)
+        if not isinstance(step_sets, int) or step_sets < 1:
+            raise ToolError(
+                "sets must be >= 1",
+                code="VALIDATION_ERROR",
+                hint="Use the number of consecutive sets for this exercise.",
+            )
         if target_type == _TARGET_TIME:
-            total_duration += target_value
-        total_duration += rest
+            total_duration += target_value * step_sets
+        total_duration += rest * step_sets
         built.append(
             {
                 "access": 0,
@@ -188,7 +205,7 @@ def build_strength_program_payload(
                 "groupId": "",
                 "restType": 1,
                 "restValue": rest,
-                "sets": 1,
+                "sets": step_sets,
                 "sortNo": index,
                 "sourceUrl": resolved.get("source_url") or "",
                 "sportType": _STRENGTH_SPORT_TYPE,
@@ -202,7 +219,7 @@ def build_strength_program_payload(
             }
         )
 
-    total_duration *= sets
+    total_sets = sum(int(item["sets"]) for item in built)
     return {
         "access": 1,
         "authorId": "0",
@@ -228,7 +245,7 @@ def build_strength_program_payload(
         "subType": 65535,
         "targetType": 0,
         "targetValue": 0,
-        "totalSets": sets,
+        "totalSets": total_sets,
         "unit": 0,
         "userId": "0",
         "version": 0,

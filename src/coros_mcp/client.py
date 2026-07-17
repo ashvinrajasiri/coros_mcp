@@ -130,11 +130,22 @@ class CorosClient:
         return []
 
     def delete_program(self, program_id: str) -> None:
-        self._request(
-            "POST",
-            "/training/program/delete",
-            content=json.dumps([program_id]),
-        )
+        self.delete_programs([program_id])
+
+    def delete_programs(self, program_ids: list[str]) -> None:
+        """Delete one or more library programs (COROS accepts a JSON id array)."""
+        ids = [str(program_id) for program_id in program_ids if program_id]
+        if not ids:
+            return
+        # Stay under typical request body sizes when clearing large libraries.
+        chunk_size = 25
+        for start in range(0, len(ids), chunk_size):
+            chunk = ids[start : start + chunk_size]
+            self._request(
+                "POST",
+                "/training/program/delete",
+                content=json.dumps(chunk),
+            )
 
     def query_schedule(self, start: str, end: str) -> dict:
         # Schedule uses startDate/endDate; analyse/activity use startDay/endDay.

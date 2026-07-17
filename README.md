@@ -173,12 +173,12 @@ Strength uses the live COROS exercise catalog (~380 moves), not free-text step n
   "exercises": [
     { "name": "Push Ups", "reps": 12, "rest_sec": 45 },
     { "name": "Planks", "duration_sec": 40, "rest_sec": 30 },
-    { "name": "Squats", "reps": 15, "rest_sec": 45 }
+    { "name": "Squats", "reps": 15, "rest_sec": 45, "sets": 4 }
   ]
 }
 ```
 
-`sets` repeats the whole circuit. Bodyweight for now (no weight targets yet).
+`sets` is consecutive sets **per exercise** (COROS stores it on each move). Workout-level `sets` is the default; an exercise can override with its own `sets`. Bodyweight for now (no weight targets yet).
 
 ## Tools
 
@@ -186,9 +186,21 @@ Strength uses the live COROS exercise catalog (~380 moves), not free-text step n
 |---|---|
 | `get_daily_metrics` | Sleep / recovery-style daily metrics |
 | `list_activities` / `get_activity` | Completed activities |
-| `list_workouts` / `get_workout` / `create_workout` / `delete_workout` | Run/bike-style library |
+| `list_workouts` / `get_workout` / `create_workout` | Library (list/get return compact payloads) |
+| `delete_workout` / `delete_workouts` | Delete one or many library workouts |
 | `search_strength_exercises` / `create_strength_workout` | Strength catalog + create |
 | `list_scheduled_workouts` / `schedule_workout` / `unschedule_workout` | Calendar |
+
+## Token efficiency
+
+Tool results are kept small so agent hosts (Hermes/OpenRouter) spend less per call:
+
+- `list_workouts` → `{id, name, sport, step_count}` only  
+- `get_workout` → compact steps; pass `raw=true` only when debugging  
+- `search_strength_exercises` → `{id, name}` (default `limit=10`); `verbose=true` for metadata  
+- `delete_workouts([…])` for bulk deletes instead of looping `delete_workout`  
+- Prefer short date windows on calendar/activity list tools  
+- For mass cleanup outside the agent, use `scripts/cleanup_workouts.py`
 
 ## Quick check
 
@@ -196,6 +208,18 @@ Strength uses the live COROS exercise catalog (~380 moves), not free-text step n
 2. `create_workout` with a short easy run and pace targets  
 3. Confirm paces in Training Hub (e.g. `5'45"–6'10" min/km`)  
 4. `schedule_workout` → sync phone app → check watch  
+
+## Bulk cleanup (no MCP tokens)
+
+Deleting dozens of workouts through an agent burns context. Use the local script instead:
+
+```bash
+source .venv/bin/activate
+# preview workouts with the old millisecond pace bug
+python scripts/cleanup_workouts.py --bad-pace
+# delete them (optional: also clear matching calendar entries)
+python scripts/cleanup_workouts.py --bad-pace --unschedule --apply
+```
 
 ## Dev
 

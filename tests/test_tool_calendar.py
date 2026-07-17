@@ -124,6 +124,18 @@ def test_unschedule_workout_sends_delete_status(monkeypatch):
     ]
 
 
+def test_unschedule_workout_uses_around_date_window(monkeypatch):
+    from coros_mcp import server
+
+    client = FakeClient()
+    monkeypatch.setattr(server, "_get_client", lambda: client)
+
+    assert server.unschedule_workout(
+        "schedule-entry-1", around_date="2026-07-20"
+    ) == {"schedule_id": "schedule-entry-1"}
+    assert client.queried_ranges == [("2026-07-13", "2026-07-27")]
+
+
 def test_multi_month_ranges_are_passed_to_schedule_query(monkeypatch):
     from coros_mcp import server
 

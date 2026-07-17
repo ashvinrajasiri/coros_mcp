@@ -5,6 +5,7 @@ class FakeClient:
     def __init__(self):
         self.created_payload: dict | None = None
         self.deleted_id: str | None = None
+        self.deleted_ids: list[str] | None = None
         self.list_arg: int | None = None
 
     @property
@@ -13,10 +14,31 @@ class FakeClient:
 
     def list_programs(self, sport_type: int | None = None) -> list[dict]:
         self.list_arg = sport_type
-        return [{"id": "workout-1", "name": "Morning Run"}]
+        return [
+            {
+                "id": "workout-1",
+                "name": "Morning Run",
+                "sportType": 1,
+                "exerciseBarChart": [{"x": 1}],
+                "exercises": [{"name": "Steady", "targetType": 2, "targetValue": 1800}],
+            }
+        ]
 
     def get_program(self, program_id: str) -> dict:
-        return {"id": program_id, "name": "Morning Run"}
+        return {
+            "id": program_id,
+            "name": "Morning Run",
+            "sportType": 1,
+            "exerciseBarChart": [{"x": 1}],
+            "exercises": [
+                {
+                    "name": "Steady",
+                    "targetType": 2,
+                    "targetValue": 1800,
+                    "intensityPercent": 1,
+                }
+            ],
+        }
 
     def create_program(self, payload: dict) -> str:
         self.created_payload = payload
@@ -24,6 +46,9 @@ class FakeClient:
 
     def delete_program(self, program_id: str) -> None:
         self.deleted_id = program_id
+
+    def delete_programs(self, program_ids: list[str]) -> None:
+        self.deleted_ids = list(program_ids)
 
 
 def test_create_workout_maps_run_steps_and_creates_program(monkeypatch):
@@ -77,17 +102,47 @@ def test_delete_workout_deletes_single_id(monkeypatch):
     assert client.deleted_id == "123456789012345678"
 
 
-def test_list_and_get_workouts_delegate_filters(monkeypatch):
+def test_list_and_get_workouts_return_compact_payloads(monkeypatch):
     from coros_mcp import server
 
     client = FakeClient()
     monkeypatch.setattr(server, "_get_client", lambda: client)
 
     assert server.list_workouts("run", "Morning") == {
-        "workouts": [{"id": "workout-1", "name": "Morning Run"}]
+        "workouts": [
+            {
+                "id": "workout-1",
+                "name": "Morning Run",
+                "sport": "run",
+                "step_count": 1,
+            }
+        ]
     }
     assert client.list_arg == 1
-    assert server.get_workout("workout-1") == {"id": "workout-1", "name": "Morning Run"}
+    assert server.get_workout("workout-1") == {
+        "id": "workout-1",
+        "name": "Morning Run",
+        "sport": "run",
+        "step_count": 1,
+        "steps": [
+            {"name": "Steady", "targetType": 2, "targetValue": 1800}
+        ],
+    }
+    raw = server.get_workout("workout-1", raw=True)
+    assert "exerciseBarChart" in raw
+
+
+def test_delete_workouts_batches_ids(monkeypatch):
+    from coros_mcp import server
+
+    client = FakeClient()
+    monkeypatch.setattr(server, "_get_client", lambda: client)
+
+    assert server.delete_workouts(["a", "b"]) == {
+        "deleted": ["a", "b"],
+        "count": 2,
+    }
+    assert client.deleted_ids == ["a", "b"]
 
 
 def test_library_tools_return_standard_error_payload(monkeypatch):
